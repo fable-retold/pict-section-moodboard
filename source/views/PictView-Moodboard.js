@@ -38,8 +38,19 @@ const libStickerSource = require('../sources/StickerSource-Base.js');
 const _NOTE_COLORS = ['#ffe08a', '#ffb3c1', '#a8d8ff', '#b7e4c7', '#d8c2ff', '#ffd6a5', '#e6e6e6'];
 
 // Curated board-background swatches: paper neutrals, soft tints, and one near-black for a dark board.
-// A custom-color input and a "no background" option sit beside them in the background popover.
+// A custom-color input and a "no background" option sit beside them in the gear Appearance section.
 const _BACKGROUND_COLORS = ['#ffffff', '#faf7f2', '#f1f5f9', '#eef2ff', '#ecfdf5', '#fef2f2', '#fdf4ff', '#111827'];
+
+// The display modes, shown in the toolbar's display-mode dropdown (one button whose icon is the current
+// mode; the menu lists these with an icon + label). Add a mode here and it appears in the menu -- the
+// toolbar stays one button, not one-per-mode. Each Icon is a flow icon key.
+const _DISPLAY_MODES =
+[
+	{ Key: 'canvas', Label: 'Canvas', Hint: 'Plain free-form board', Icon: 'display-canvas' },
+	{ Key: 'jumbotron', Label: 'Jumbotron', Hint: 'Hero band at the top', Icon: 'display-jumbotron' },
+	{ Key: 'background', Label: 'Background', Hint: 'Full-width backdrop', Icon: 'display-background' }
+];
+function _displayMode(pKey) { return _DISPLAY_MODES.find((pMode) => pMode.Key === pKey) || _DISPLAY_MODES[0]; }
 
 // Curated, web-safe font stacks for note + text cards (no web-font loading -- these resolve to fonts
 // already on the machine). The panel select passes a key; setFontFamily resolves it to the stack.
@@ -145,7 +156,9 @@ const _ViewConfiguration =
 		   the theme (gear) popup. Cards, delete, zoom, fit, fullscreen, dock/float, and collapse stay. The
 		   floating (draggable) toolbar lists its layout buttons individually, so hide those by action too. */
 		.mb-root .pict-flow-toolbar-group:has([data-flow-action="layout-popup"]) { display: none; }
-		.mb-root [data-flow-action="settings-popup"] { display: none; }
+		/* The gear (settings) popup holds the moodboard's Appearance section (board color + backdrop margin)
+		   in edit mode; hide it only on a read-only board (a viewer changes nothing). */
+		.mb-readonly [data-flow-action="settings-popup"] { display: none; }
 		.mb-root .pict-flow-floating-toolbar [data-flow-action="auto-layout"],
 		.mb-root .pict-flow-floating-toolbar [data-flow-action="layout-popup"] { display: none; }
 
@@ -164,21 +177,55 @@ const _ViewConfiguration =
 		.mb-readonly .pict-flow-toolbar-collapsed:focus-within { opacity: 1; }
 		.mb-readonly .mb-canvas { cursor: grab; }
 		.mb-readonly .mb-canvas:active { cursor: grabbing; }
+		/* The dashed view-area frame is an editing guide (the box jumbotron / background fit the width
+		   of); hide it on any read-only board so a viewer never sees the guide. The frame DATA still
+		   drives the width-fit -- only the rect is hidden. */
+		.mb-readonly .pict-flow-frame { display: none; }
+		/* A selected card keeps its selection glow + stroke in the flow's chrome; on a read-only board a
+		   viewer should not see that editing affordance (e.g. a card that was selected when the board was
+		   saved). Suppress the selection chrome so the display reads as finished content. */
+		.mb-readonly .pict-flow-node.selected { filter: none; }
+		.mb-readonly .pict-flow-node.selected .pict-flow-node-body { stroke: none; stroke-width: 0; }
 
-		/* Board-background popover (opened from the toolbar Background button). Fixed + above the flow's
-		   own fullscreen (z-index 9999) so it shows while editing full screen. */
-		.mb-bgpop { display: none; position: fixed; z-index: 10001; min-width: 168px; padding: 10px 11px; border-radius: 10px; background: var(--theme-color-background-panel, #fff); border: 1px solid var(--theme-color-border-default, #dfe3ea); box-shadow: 0 12px 34px rgba(20,30,50,0.20); }
-		.mb-bgpop-open .mb-bgpop { display: block; }
-		.mb-bgpop-label { font-size: 11px; font-weight: 600; color: var(--theme-color-text-secondary, #5b6376); text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 7px; }
-		.mb-bgpop-swatches { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-		.mb-bgpop-swatch { width: 22px; height: 22px; border-radius: 6px; border: 1px solid rgba(0,0,0,0.15); cursor: pointer; padding: 0; }
-		.mb-bgpop-swatch:hover { transform: scale(1.1); }
-		.mb-bgpop-custom { width: 24px; height: 24px; padding: 0; border: 1px solid rgba(0,0,0,0.15); border-radius: 6px; background: none; cursor: pointer; }
-		.mb-bgpop-none { position: relative; background: #fff; }
-		.mb-bgpop-none::after { content: ""; position: absolute; left: 2px; right: 2px; top: 50%; height: 2px; margin-top: -1px; background: #e23b4b; transform: rotate(-45deg); }
+		/* Presentation display styles (jumbotron / background): a read-only, width-fit hero band or
+		   full-width backdrop. The host owns the chrome (a style picker outside the board), so hide the
+		   flow's own toolbar entirely, and present a plain (non-grab) cursor since the surface is fixed
+		   width-fit, not freely pannable -- a tall background scrolls the page. */
+		.mb-presentation .pict-flow-toolbar,
+		.mb-presentation .pict-flow-floating-toolbar,
+		.mb-presentation .pict-flow-toolbar-collapsed { display: none; }
+		/* ...but once expanded to full screen, bring the docked toolbar back so its fullscreen button is
+		   the way back OUT (a presentation board has no other chrome; the host Expand control is behind the
+		   fullscreen overlay). The .pict-flow-fullscreen wrapper class is an ancestor of the toolbar, so
+		   this more-specific rule wins over the hide above. */
+		.mb-presentation .pict-flow-fullscreen .pict-flow-toolbar { display: flex; }
+		.mb-presentation .mb-canvas { cursor: default; }
+		/* A jumbotron clips to its band height; a background fills its host container. The host sizes the
+		   .mb-canvas (the band / backdrop height) -- the board fits the frame WIDTH inside it. */
+
+		/* Appearance controls (board color + backdrop margin) live in the flow toolbar's own gear popup via
+		   the SettingsSections hook -- no bespoke box. These tune the controls inside that native popup. */
+		.mb-gear-field { display: flex; flex-direction: column; gap: 5px; margin: 2px 0; }
+		.mb-gear-sub { font-size: 11px; color: var(--theme-color-text-secondary, #5b6376); }
+		.mb-gear-swatches { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+		.mb-gear-swatch { width: 20px; height: 20px; border-radius: 5px; border: 1px solid rgba(0,0,0,0.15); cursor: pointer; padding: 0; }
+		.mb-gear-swatch:hover { transform: scale(1.1); }
+		.mb-gear-color { width: 22px; height: 22px; padding: 0; border: 1px solid rgba(0,0,0,0.15); border-radius: 5px; background: none; cursor: pointer; }
+		.mb-gear-none { position: relative; background: #fff; }
+		.mb-gear-none::after { content: ""; position: absolute; left: 2px; right: 2px; top: 50%; height: 2px; margin-top: -1px; background: #e23b4b; transform: rotate(-45deg); }
+		.mb-gear-margin { width: 70px; padding: 4px 6px; border: 1px solid var(--theme-color-border-default, #d8dde6); border-radius: 5px; font-size: 12px; }
+
+		/* Display-mode dropdown: one toolbar button opens this list of modes. Reuses the flow toolbar's own
+		   popup + list-item classes (so it matches the Cards / Layout menus); these just add the per-row
+		   hint line and the current-mode mark. */
+		.mb-display-menu { min-width: 234px; }
+		.mb-display-menu .pict-flow-popup-list-item-label { display: flex; flex-direction: column; line-height: 1.25; font-weight: 600; }
+		.mb-display-menu-hint { font-size: 11px; font-weight: 400; color: var(--theme-color-text-secondary, #8a93a5); }
+		.mb-display-menu-current { background: var(--theme-color-background-secondary, #eef2f7); }
+		.mb-display-menu-current .pict-flow-popup-list-item-icon { color: var(--theme-color-brand-primary, #2880a6); }
 
 		/* A moodboard has a flat, light canvas (no dark flow grid). */
-		.mb-flow .pict-flow-grid-background { fill: var(--theme-color-background-secondary, #f4f6f9); }
+		/* canvas background is native to pict-section-flow now (moodboard profile + setBackground) */
 		/* Moodboard cards fill edge to edge: no title text, no ports, transparent note text area. */
 		.pict-flow-node-MoodImage .pict-flow-node-title,
 		.pict-flow-node-MoodNote .pict-flow-node-title,
@@ -267,22 +314,7 @@ const _ViewConfiguration =
 		<div class="mb-flow" id="MB-Flow-{~D:AppData.Moodboard.ViewID~}"></div>
 	</div>
 	<div class="mb-gallery" id="MB-Gallery-{~D:AppData.Moodboard.ViewID~}"></div>
-	<div class="mb-bgpop" id="MB-BgPopover-{~D:AppData.Moodboard.ViewID~}"></div>
 </div>`
-		},
-		{
-			Hash: 'Moodboard-BgPopover',
-			Template: /*html*/`
-<div class="mb-bgpop-label">Board background</div>
-<div class="mb-bgpop-swatches">
-	{~TS:Moodboard-BgSwatch:AppData.Moodboard.BackgroundColors~}
-	<input type="color" class="mb-bgpop-custom" title="Select a color" onchange="_Pict.views['{~D:AppData.Moodboard.ViewID~}'].setBackgroundColor(this.value)">
-	<button class="mb-bgpop-swatch mb-bgpop-none" title="No background" onclick="_Pict.views['{~D:AppData.Moodboard.ViewID~}'].setBackgroundColor('')"></button>
-</div>`
-		},
-		{
-			Hash: 'Moodboard-BgSwatch',
-			Template: /*html*/`<button class="mb-bgpop-swatch" style="background:{~D:Record.Color~}" title="Background {~D:Record.Color~}" onclick="_Pict.views['{~D:AppData.Moodboard.ViewID~}'].setBackgroundColor('{~D:Record.Color~}')"></button>`
 		},
 		{
 			Hash: 'Moodboard-Gallery',
@@ -346,6 +378,11 @@ class PictViewMoodboard extends libPictView
 		// When the library picker is opened from a card's properties panel, the chosen image / sticker is
 		// applied to THIS node (rather than adding a new card).
 		this._PickerTargetHash = null;
+		// Whether the "set view area" frame drag-handles are currently on (edit mode).
+		this._FrameEditing = false;
+		// A display style set before the flow sub-view exists (mirrors _PendingBoard) — applied once the
+		// flow is ready. { Style, TopMargin }.
+		this._PendingDisplayStyle = null;
 		this._boundOnPaste = this._onPaste.bind(this);
 	}
 
@@ -362,13 +399,21 @@ class PictViewMoodboard extends libPictView
 			this.pict.AppData.Moodboard =
 			{
 				ViewID: this.options.ViewIdentifier,
-				NoteColors: _NOTE_COLORS.map((pColor) => ({ Color: pColor })),
-				BackgroundColors: _BACKGROUND_COLORS.map((pColor) => ({ Color: pColor }))
+				NoteColors: _NOTE_COLORS.map((pColor) => ({ Color: pColor }))
 			};
 		}
 		this.pict.AppData.Moodboard.ViewID = this.options.ViewIdentifier;
-		// AppData.Moodboard is shared across instances; backfill palettes a stale (older-build) object misses.
-		if (!this.pict.AppData.Moodboard.BackgroundColors) { this.pict.AppData.Moodboard.BackgroundColors = _BACKGROUND_COLORS.map((pColor) => ({ Color: pColor })); }
+	}
+
+	// Claim the shared AppData.Moodboard.ViewID BEFORE the container template parses, so this instance's
+	// template IDs (MB-Root- / MB-Flow- / MB-Canvas-<ViewID>) and inline handlers resolve to THIS instance.
+	// Several moodboards can be registered on one Pict (a profile banner + a vision board); whichever is
+	// rendering must own the ID at parse time -- doing it only in onAfterRender is too late (the template
+	// already rendered with whatever instance set the shared ViewID last, painting the wrong container).
+	onBeforeRender(pRenderable)
+	{
+		this._initState();
+		return super.onBeforeRender(pRenderable);
 	}
 
 	onAfterRender(pRenderable, pRenderDestinationAddress, pRecord, pContent)
@@ -378,6 +423,11 @@ class PictViewMoodboard extends libPictView
 		// registered on one Pict (the Moodboard section plus per-user profile boards).
 		if (this.pict.AppData.Moodboard) { this.pict.AppData.Moodboard.ViewID = this.options.ViewIdentifier; }
 		this._ensureFlowView();
+		// Establish the flow's presentation behavior for the current display style (canvas / jumbotron /
+		// background) BEFORE the editable-vs-read-only chrome below: a presentation style reports as
+		// non-editable (see _isEditable), so this must run first for the mb-readonly class + toolbar mode
+		// to match.
+		this._applyDisplayStyle();
 		// Mark the root read-only so the CSS gives a navigation-only, collapsed-on-hover toolbar and a
 		// non-editable canvas.
 		let tmpRoot = document.getElementById('MB-Root-' + this.options.ViewIdentifier);
@@ -418,7 +468,15 @@ class PictViewMoodboard extends libPictView
 			// resize has no inline equivalent; wire once).
 			if (!this._ResizeWired)
 			{
-				this._boundOnResize = this._boundOnResize || (() => { if (!this._isEditable()) { this.fitBoard(); } });
+				this._boundOnResize = this._boundOnResize || (() =>
+				{
+					if (this._isEditable()) { return; }
+					// Presentation styles (jumbotron / background) are width-fit; the flow's own
+					// ResizeObserver owns re-fitting them, so the moodboard does NOT contain-fit on resize
+					// (that would fight the width-fit). Only the plain read-only canvas re-fits here.
+					if (this._isPresentationStyle()) { return; }
+					this.fitBoard();
+				});
 				window.addEventListener('resize', this._boundOnResize);
 				this._ResizeWired = true;
 			}
@@ -443,34 +501,85 @@ class PictViewMoodboard extends libPictView
 		return super.onAfterRender(pRenderable, pRenderDestinationAddress, pRecord, pContent);
 	}
 
-	// Fit every card into view with a little padding (the flow's zoomToFit pads 50px). Used on load
-	// (both modes) and when a read-only board's window resizes.
-	fitBoard() { if (this._FlowView && typeof this._FlowView.zoomToFit === 'function') { this._FlowView.zoomToFit(); } }
+	// Fit the board into view. A plain canvas contains every card with a little padding (zoomToFit pads
+	// 50px). A presentation style (jumbotron / background) instead fits the view-area frame's WIDTH to
+	// the container (content bleeds past), matching how it displays. Used on load (both modes) and when
+	// a read-only canvas board's window resizes.
+	fitBoard()
+	{
+		if (!this._FlowView) { return; }
+		if (this._isPresentationStyle())
+		{
+			if (typeof this._FlowView.fitToWidth === 'function') { this._FlowView.fitToWidth(); }
+			return;
+		}
+		if (typeof this._FlowView.zoomToFit === 'function') { this._FlowView.zoomToFit(); }
+	}
 
 	// ── flow toolbar custom buttons (background + the host's Edit / Done) ──────
-	// The moodboard contributes a Background button (editable only); the host can supply more (an Edit
-	// button on a read-only board it owns, a Done button on the editable board) via options.ToolbarButtons.
+	// The moodboard contributes its editing controls (the display-style toggle, set-view-area, connections)
+	// to the flow toolbar (editable only). The host can supply more (an Edit / Done button) via
+	// options.ToolbarButtons. The board color + backdrop margin live in the flow gear (SettingsSections).
 	_buildToolbarButtons(pEditable)
 	{
 		let tmpButtons = [];
 		if (pEditable)
 		{
-			tmpButtons.push({ Hash: 'mb-background', Icon: 'background', Tooltip: 'Board background' });
+			// One display-mode button: its icon is the CURRENT mode and it opens a dropdown of the modes
+			// (icon + label). Picking one stores that style; the board itself stays the editable canvas
+			// while you work, and the chosen mode shows when you view. One button scales to any number of
+			// modes (the menu grows, the bar does not). The view-area frame + backdrop margin (gear) tune it.
+			let tmpMode = _displayMode(this._displayStyle());
+			tmpButtons.push({ Hash: 'mb-display', Icon: tmpMode.Icon, Tooltip: 'Display mode: ' + tmpMode.Label });
+			// Toggles the "set view area" frame handles — the box a jumbotron / background display fits the
+			// width of. Active mirrors _FrameEditing.
+			tmpButtons.push({ Hash: 'mb-frame', Icon: 'frame', Toggle: true, Tooltip: 'Set the view area (the box a jumbotron / background fits)', Active: !!this._FrameEditing });
 			// Toggles connection points on the selected card(s); Active is kept in sync with the selection
 			// by _updateConnectButton so it reads like a checkbox for the current card.
-			tmpButtons.push({ Hash: 'mb-connect', Icon: 'connect', Tooltip: 'Connection points on the selected card (C)' });
+			tmpButtons.push({ Hash: 'mb-connect', Icon: 'connect', Toggle: true, Tooltip: 'Connection points on the selected card (C)' });
+		}
+		else
+		{
+			// Read-only display: a Photoshop-style "hand" toggle. Off (default) the canvas is static and
+			// the wheel scrolls the page; on, you drag to pan and wheel to zoom. Active mirrors the flow's
+			// read-only navigation state.
+			tmpButtons.push({ Hash: 'mb-navigate', Icon: 'pan', Toggle: true, Tooltip: 'Pan and zoom (drag to move, wheel to zoom)', Active: !!(this._FlowView && typeof this._FlowView.isReadOnlyNavigation === 'function' && this._FlowView.isReadOnlyNavigation()) });
 		}
 		let tmpHostButtons = Array.isArray(this.options.ToolbarButtons) ? this.options.ToolbarButtons : [];
 		return tmpButtons.concat(tmpHostButtons);
 	}
 
-	// Routed from the flow's onToolbarButton hook. Background opens the popover and Connections toggles
-	// the selection's points; everything else is a host button, forwarded to options.onToolbarButton.
+	// Routed from the flow's onToolbarButton hook. The style toggles set the display style, Connections
+	// toggles the selection's points, Set-view-area flips the frame handles; everything else is a host
+	// button, forwarded to options.onToolbarButton.
 	onToolbarButton(pHash, pElement)
 	{
-		if (pHash === 'mb-background') { this.openBackgroundPopover(pElement); return; }
+		if (pHash === 'mb-display') { this.openDisplayMenu(pElement); return; }
 		if (pHash === 'mb-connect') { this.toggleConnectPoints(); return; }
+		if (pHash === 'mb-frame') { this.toggleFrameEditing(); return; }
+		if (pHash === 'mb-navigate') { this.toggleNavigate(); return; }
 		if (typeof this.options.onToolbarButton === 'function') { this.options.onToolbarButton(pHash, pElement); }
+	}
+
+	// The read-only "hand" toggle: flips the flow's native read-only navigation (pan + wheel-zoom). Off,
+	// the wheel scrolls the page and the board is static; on, drag pans and the wheel zooms.
+	toggleNavigate()
+	{
+		if (!this._FlowView || typeof this._FlowView.setReadOnlyNavigation !== 'function') { return; }
+		this._FlowView.setReadOnlyNavigation(!this._FlowView.isReadOnlyNavigation());
+		this._updateNavigateButton();
+	}
+
+	_updateNavigateButton()
+	{
+		if (!this._FlowView || !this._FlowView._ToolbarView) { return; }
+		let tmpButtons = this._FlowView.options.ToolbarExtraButtons || [];
+		let tmpButton = tmpButtons.find((pButton) => pButton.Hash === 'mb-navigate');
+		if (!tmpButton) { return; }
+		let tmpActive = !!(typeof this._FlowView.isReadOnlyNavigation === 'function' && this._FlowView.isReadOnlyNavigation());
+		if (tmpButton.Active === tmpActive) { return; }
+		tmpButton.Active = tmpActive;
+		if (typeof this._FlowView._ToolbarView.render === 'function') { this._FlowView._ToolbarView.render(); }
 	}
 
 	// Push the current button set onto the flow toolbar and pick its mode for a read-only board. Deferred
@@ -495,9 +604,8 @@ class PictViewMoodboard extends libPictView
 			tmpSelf._syncToolbarButtons(tmpToolbar);
 			if (!tmpSelf._isEditable() && typeof tmpToolbar._setToolbarMode === 'function')
 			{
-				let tmpHostButtons = Array.isArray(tmpSelf.options.ToolbarButtons) ? tmpSelf.options.ToolbarButtons : [];
-				let tmpDesired = (tmpHostButtons.length === 0) ? 'collapsed' : 'docked';
-				if (tmpToolbar._ToolbarMode !== tmpDesired) { tmpToolbar._setToolbarMode(tmpDesired); }
+				// Read-only shows a minimal docked toolbar so the pan/zoom (hand) toggle is always visible.
+				if (tmpToolbar._ToolbarMode !== 'docked') { tmpToolbar._setToolbarMode('docked'); }
 			}
 		};
 		if (typeof requestAnimationFrame === 'function') { requestAnimationFrame(fSetup); } else { setTimeout(fSetup, 50); }
@@ -525,27 +633,27 @@ class PictViewMoodboard extends libPictView
 	// moodboard's own .mb-canvas, so it shows under the cards on both editable and read-only boards.
 	_boardBackground()
 	{
-		if (this._FlowView && this._FlowView.viewState && this._FlowView.viewState.BackgroundColor) { return this._FlowView.viewState.BackgroundColor; }
-		if (this._PendingBoard && this._PendingBoard.ViewState && this._PendingBoard.ViewState.BackgroundColor) { return this._PendingBoard.ViewState.BackgroundColor; }
+		let tmpVS = (this._FlowView && this._FlowView._FlowData) ? this._FlowView._FlowData.ViewState : null;
+		if (tmpVS && tmpVS.Background && tmpVS.Background.Color) { return tmpVS.Background.Color; }
+		// Legacy boards stored a flat ViewState.BackgroundColor.
+		if (tmpVS && tmpVS.BackgroundColor) { return tmpVS.BackgroundColor; }
+		if (this._PendingBoard && this._PendingBoard.ViewState)
+		{
+			if (this._PendingBoard.ViewState.Background && this._PendingBoard.ViewState.Background.Color) { return this._PendingBoard.ViewState.Background.Color; }
+			if (this._PendingBoard.ViewState.BackgroundColor) { return this._PendingBoard.ViewState.BackgroundColor; }
+		}
 		return '';
 	}
 
+	// The board background is now native to pict-section-flow (setBackground / ViewState.Background).
+	// Migrate any legacy ViewState.BackgroundColor onto the native shape, then ask the flow to repaint;
+	// the flow falls back to the moodboard profile's flat canvas color when none is set.
 	_applyBackground()
 	{
-		let tmpRoot = document.getElementById('MB-Root-' + this.options.ViewIdentifier);
-		if (!tmpRoot) { return; }
-		let tmpColor = this._boardBackground() || '';
-		// The flow paints an opaque .pict-flow-container (its default canvas gray); the chosen color goes
-		// there. Clearing it ('') reverts to that default. .mb-canvas is painted too so the color shows in
-		// the brief moment before the flow container mounts.
-		let tmpContainer = tmpRoot.querySelector('.pict-flow-container');
-		if (tmpContainer) { tmpContainer.style.backgroundColor = tmpColor; }
-		let tmpCanvas = tmpRoot.querySelector('.mb-canvas');
-		if (tmpCanvas) { tmpCanvas.style.backgroundColor = tmpColor; }
-		// The flow's grid-background rect paints over the container; neutralize it so the board color (or
-		// the default canvas color) shows. A moodboard is a freeform canvas, not a node graph -- no grid.
-		let tmpGrid = tmpRoot.querySelector('.pict-flow-grid-background');
-		if (tmpGrid) { tmpGrid.style.fill = 'transparent'; }
+		if (!this._FlowView) { return; }
+		let tmpVS = this._FlowView._FlowData ? this._FlowView._FlowData.ViewState : null;
+		if (tmpVS && tmpVS.BackgroundColor && !tmpVS.Background) { tmpVS.Background = { Style: 'solid', Color: tmpVS.BackgroundColor }; }
+		if (typeof this._FlowView._applyBackground === 'function') { this._FlowView._applyBackground(); }
 	}
 
 	// Paint now and again after the flow settles -- a render can recreate the canvas after the immediate
@@ -562,74 +670,443 @@ class PictViewMoodboard extends libPictView
 	setBackgroundColor(pColor)
 	{
 		if (!this._FlowView) { return; }
-		let tmpColor = (typeof pColor === 'string') ? pColor : '';
-		if (this._FlowView.viewState) { this._FlowView.viewState.BackgroundColor = tmpColor; }
-		if (this._PendingBoard && this._PendingBoard.ViewState) { this._PendingBoard.ViewState.BackgroundColor = tmpColor; }
-		this._applyBackground();
+		// Empty / "no background" falls back to the flat moodboard canvas color. All board colors now
+		// flow through pict-section-flow's native setBackground (stored on ViewState.Background).
+		let tmpColor = (typeof pColor === 'string' && pColor) ? pColor : '#f4f6f9';
+		if (typeof this._FlowView.setBackground === 'function') { this._FlowView.setBackground({ Style: 'solid', Color: tmpColor }); }
 		this._emitChange();
 	}
 
-	// The Background toolbar button opens a small popover next to it: the palette swatches, a custom
-	// color ("select a color"), and a "no background" option. Click the button again, click outside, or
-	// press Escape to dismiss. Positioned with the button's viewport rect (the popover is position:fixed).
-	openBackgroundPopover(pAnchor)
+	// A board is editable unless the host opts out with Editable:false (a read-only display: a teammate's
+	// profile, a hub thumbnail). Editability is INDEPENDENT of the display style: while editing you always
+	// get the free canvas (see _effectiveStyle), and the chosen jumbotron / background only takes visual
+	// effect in view mode.
+	_isEditable() { return this.options.Editable !== false; }
+
+	// Toggle edit vs view (read-only) mode at runtime. Editable boards drag/resize/rotate/connect cards on
+	// the free canvas; view boards render the stored display style read-only. Keeps the edit-only flow
+	// flags in sync and re-renders; _applyDisplayStyle (run from onAfterRender) drives the flow ReadOnly +
+	// FitMode for the resulting effective style.
+	setEditable(pEditable)
 	{
+		this.options.Editable = (pEditable !== false);
+		this.closeDisplayMenu();
+		if (this._FlowView)
+		{
+			// Flip the flow's read-only + edit flags up front (a canvas board follows Editable;
+			// _applyDisplayStyle re-confirms read-only for a presentation effective style after render).
+			if (typeof this._FlowView.setReadOnly === 'function') { this._FlowView.setReadOnly(!this.options.Editable); }
+			this._FlowView.options.EnableCardPalette = this.options.Editable;
+			this._FlowView.options.EnableConnectionCreation = this.options.Editable;
+			this._FlowView.options.EnableNodeDragging = this.options.Editable;
+			this._FlowView.options.EnableNodeResizing = this.options.Editable;
+			this._FlowView.options.EnableGridSnap = this.options.Editable;
+			this._FlowView.options.EnableAlignmentGuides = this.options.Editable;
+			// Swap the toolbar's extra buttons to this mode's set authoritatively, so a flow re-render does
+			// not paint the previous mode's buttons before the deferred toolbar sync catches up (the
+			// view -> edit transition otherwise kept showing the read-only navigate button).
+			let tmpButtons = this._buildToolbarButtons(this.options.Editable);
+			this._FlowView.options.ToolbarExtraButtons = tmpButtons;
+			if (this._FlowView._ToolbarView)
+			{
+				this._FlowView._ToolbarView.options.ToolbarExtraButtons = tmpButtons;
+				if (this._FlowView._ToolbarView._FloatingToolbarView) { this._FlowView._ToolbarView._FloatingToolbarView.options.ToolbarExtraButtons = tmpButtons; }
+			}
+		}
+		this.render();
+		return this.options.Editable;
+	}
+
+	// ── display style (canvas / jumbotron / background) ─────────────────────────
+	// How the board presents WHEN VIEWED. 'canvas' (default) is the plain board; 'jumbotron' and
+	// 'background' are width-fit presentation surfaces that fit the WIDTH of the defined view-area frame
+	// to the container (content bleeds past) — a jumbotron is a hero band whose height is the frame's
+	// scaled height, a background is a full-width backdrop honoring a top margin. The style + its margin
+	// ride on the flow ViewState so they persist (getFlowData deep-clones ViewState; setFlowData preserves
+	// extra keys, exactly like the native Frame). Editing is decoupled: while editable the board is always
+	// the free canvas (you arrange + set the view area), so the style is authored, not entered.
+
+	// The stored display style, defaulting to 'canvas'. Reads the flow ViewState, then a board / style
+	// stashed before the flow existed. This is what the style toggle reflects and what view mode renders.
+	_displayStyle()
+	{
+		let tmpVS = (this._FlowView && this._FlowView._FlowData) ? this._FlowView._FlowData.ViewState : null;
+		let tmpStyle = (tmpVS && tmpVS.DisplayStyle) ? tmpVS.DisplayStyle : null;
+		if (!tmpStyle && this._PendingBoard && this._PendingBoard.ViewState && this._PendingBoard.ViewState.DisplayStyle) { tmpStyle = this._PendingBoard.ViewState.DisplayStyle; }
+		if (!tmpStyle && this._PendingDisplayStyle && this._PendingDisplayStyle.Style) { tmpStyle = this._PendingDisplayStyle.Style; }
+		return (tmpStyle === 'jumbotron' || tmpStyle === 'background') ? tmpStyle : 'canvas';
+	}
+
+	// The style the board actually PRESENTS as: the free canvas while editing (so you can drag + frame),
+	// the stored style when viewing. The stored style is left untouched while editing.
+	_effectiveStyle() { return this._isEditable() ? 'canvas' : this._displayStyle(); }
+
+	// True when the board is presenting as a width-fit surface right now (only in view mode).
+	_isPresentationStyle() { let tmpStyle = this._effectiveStyle(); return tmpStyle === 'jumbotron' || tmpStyle === 'background'; }
+
+	// Public read of the stored display style + background top margin, for a host that sizes the board's
+	// container (a jumbotron band, a background backdrop) and reacts to onDisplayStyleChanged.
+	getDisplayStyle() { return this._displayStyle(); }
+	getDisplayTopMargin() { return this._displayTopMargin(); }
+	getEffectiveDisplayStyle() { return this._effectiveStyle(); }
+
+	// The presentation top margin (background only; a jumbotron sits flush). Same lookup order as the style.
+	_displayTopMargin()
+	{
+		let tmpVS = (this._FlowView && this._FlowView._FlowData) ? this._FlowView._FlowData.ViewState : null;
+		if (tmpVS && typeof tmpVS.DisplayStyleTopMargin === 'number') { return tmpVS.DisplayStyleTopMargin; }
+		if (this._PendingBoard && this._PendingBoard.ViewState && typeof this._PendingBoard.ViewState.DisplayStyleTopMargin === 'number') { return this._PendingBoard.ViewState.DisplayStyleTopMargin; }
+		if (this._PendingDisplayStyle && typeof this._PendingDisplayStyle.TopMargin === 'number') { return this._PendingDisplayStyle.TopMargin; }
+		return 0;
+	}
+
+	// Set (and persist) the stored display style. pOptions.TopMargin (number) sets the background margin.
+	// Stores on the flow ViewState, re-applies the effective presentation, refreshes the toolbar's style
+	// toggle, and emits a change so a host autosaves. While editing this just records the choice (the board
+	// stays the canvas); it takes visual effect in view mode.
+	setDisplayStyle(pStyle, pOptions)
+	{
+		let tmpStyle = (pStyle === 'jumbotron' || pStyle === 'background') ? pStyle : 'canvas';
+		let tmpOptions = pOptions || {};
+		if (!this._FlowView || !this._FlowView._FlowData)
+		{
+			// Flow not ready yet: stash and apply once it exists (see _applyDisplayStyle).
+			this._PendingDisplayStyle = { Style: tmpStyle, TopMargin: (typeof tmpOptions.TopMargin === 'number') ? tmpOptions.TopMargin : undefined };
+			return tmpStyle;
+		}
+		let tmpVS = this._FlowView._FlowData.ViewState;
+		tmpVS.DisplayStyle = tmpStyle;
+		if (typeof tmpOptions.TopMargin === 'number') { tmpVS.DisplayStyleTopMargin = tmpOptions.TopMargin; }
+		else if (typeof tmpVS.DisplayStyleTopMargin !== 'number') { tmpVS.DisplayStyleTopMargin = 0; }
+		this._PendingDisplayStyle = null;
+		this._applyDisplayStyle();
+		this._updateDisplayButton();
+		this._emitChange();
+		return tmpStyle;
+	}
+
+	// Set just the background top margin (the gear control). Re-applies + persists.
+	setDisplayMargin(pValue)
+	{
+		let tmpNum = parseInt(pValue, 10);
+		let tmpMargin = isNaN(tmpNum) ? 0 : Math.max(0, tmpNum);
+		if (this._FlowView && this._FlowView._FlowData) { this._FlowView._FlowData.ViewState.DisplayStyleTopMargin = tmpMargin; }
+		else if (this._PendingDisplayStyle) { this._PendingDisplayStyle.TopMargin = tmpMargin; }
+		this._applyDisplayStyle();
+		this._emitChange();
+		return tmpMargin;
+	}
+
+	// Establish the flow sub-view's behavior for the current EFFECTIVE style. Idempotent and cheap — run
+	// from onAfterRender on every render, from setDisplayStyle / setDisplayMargin, and after a board loads.
+	// A presentation effective style goes read-only + width-fit (anchored at the top margin) over a view-
+	// area frame with the flow's width-fit ResizeObserver; the canvas effective style restores contain-fit,
+	// drops the observer, and follows Editable for read-only.
+	_applyDisplayStyle()
+	{
+		if (!this._FlowView || !this._FlowView._FlowData) { return; }
+		// Land a style stashed before the flow existed onto the (now present) ViewState.
+		if (this._PendingDisplayStyle)
+		{
+			let tmpVSPending = this._FlowView._FlowData.ViewState;
+			tmpVSPending.DisplayStyle = this._PendingDisplayStyle.Style;
+			if (typeof this._PendingDisplayStyle.TopMargin === 'number') { tmpVSPending.DisplayStyleTopMargin = this._PendingDisplayStyle.TopMargin; }
+			this._PendingDisplayStyle = null;
+		}
+
+		let tmpEffective = this._effectiveStyle();
 		let tmpRoot = document.getElementById('MB-Root-' + this.options.ViewIdentifier);
-		let tmpPopover = document.getElementById('MB-BgPopover-' + this.options.ViewIdentifier);
-		if (!tmpRoot || !tmpPopover) { return; }
-		if (tmpRoot.classList.contains('mb-bgpop-open')) { this.closeBackgroundPopover(); return; }
-		tmpPopover.innerHTML = this.pict.parseTemplateByHash('Moodboard-BgPopover', { ViewID: this.options.ViewIdentifier });
-		tmpRoot.classList.add('mb-bgpop-open');
+
+		// The "set view area" handles are an edit-mode affordance; off whenever the board is not editable.
+		if (!this._isEditable() && this._FrameEditing && typeof this._FlowView.setFrameEditing === 'function') { this._FrameEditing = false; this._FlowView.setFrameEditing(false); }
+
+		if (tmpEffective === 'jumbotron' || tmpEffective === 'background')
+		{
+			// A jumbotron sits flush at the top of its band (margin 0); only a background honors a top
+			// margin (e.g. to clear a fixed page header).
+			let tmpMargin = (tmpEffective === 'background') ? this._displayTopMargin() : 0;
+			this._FlowView.options.FitMode = 'width';
+			this._FlowView.options.FitTopMargin = tmpMargin;
+			if (typeof this._FlowView.setReadOnly === 'function' && !this._FlowView.isReadOnly()) { this._FlowView.setReadOnly(true); }
+			// A presentation surface fits the WIDTH of a view-area frame; seed one from the content bounds
+			// if the board has none yet.
+			this._ensureFrame();
+			if (typeof this._FlowView._setupFitObserver === 'function') { this._FlowView._setupFitObserver(); }
+		}
+		else
+		{
+			this._FlowView.options.FitMode = 'contain';
+			if (typeof this._FlowView._teardownFitObserver === 'function') { this._FlowView._teardownFitObserver(); }
+			let tmpReadOnly = !this._isEditable();
+			if (typeof this._FlowView.setReadOnly === 'function' && this._FlowView.isReadOnly() !== tmpReadOnly) { this._FlowView.setReadOnly(tmpReadOnly); }
+		}
+
+		// Root classes reflect the EFFECTIVE presentation: editing a jumbotron board still shows the canvas
+		// editing chrome; a presentation board hides the chrome + the dashed view-area guide.
+		if (tmpRoot)
+		{
+			tmpRoot.classList.toggle('mb-presentation', tmpEffective !== 'canvas');
+			tmpRoot.classList.toggle('mb-style-jumbotron', tmpEffective === 'jumbotron');
+			tmpRoot.classList.toggle('mb-style-background', tmpEffective === 'background');
+		}
+		this._emitDisplayStyleChanged();
+	}
+
+	// Notify a host (options.onDisplayStyleChanged) when the effective presentation changes, so it can size
+	// the board's container (a jumbotron band, a background backdrop, the plain box). Fired from
+	// _applyDisplayStyle but de-duplicated, so it only fires on a real change, not every render.
+	_emitDisplayStyleChanged()
+	{
+		let tmpEffective = this._effectiveStyle();
+		let tmpMargin = this._displayTopMargin();
+		let tmpKey = tmpEffective + ':' + tmpMargin;
+		if (tmpKey === this._LastDisplayStyleKey) { return; }
+		this._LastDisplayStyleKey = tmpKey;
+		if (typeof this.options.onDisplayStyleChanged === 'function')
+		{
+			this.options.onDisplayStyleChanged(
+				{
+					style: this._displayStyle(),
+					effectiveStyle: tmpEffective,
+					editable: this._isEditable(),
+					topMargin: tmpMargin,
+					jumbotronHeight: this.jumbotronHeight()
+				});
+		}
+	}
+
+	// Point the single display-mode toolbar button's icon + tooltip at the current stored mode, and
+	// re-render the toolbar only when it actually changed.
+	_updateDisplayButton()
+	{
+		if (!this._FlowView || !this._FlowView._ToolbarView) { return; }
+		let tmpButton = (this._FlowView.options.ToolbarExtraButtons || []).find((b) => b.Hash === 'mb-display');
+		if (!tmpButton) { return; }
+		let tmpMode = _displayMode(this._displayStyle());
+		if (tmpButton.Icon === tmpMode.Icon) { return; }
+		tmpButton.Icon = tmpMode.Icon;
+		tmpButton.Tooltip = 'Display mode: ' + tmpMode.Label;
+		if (typeof this._FlowView._ToolbarView.render === 'function')
+		{
+			this._FlowView._ToolbarView.render();
+			if (this._FlowView._ToolbarView._FloatingToolbarView && typeof this._FlowView._ToolbarView._FloatingToolbarView.render === 'function') { this._FlowView._ToolbarView._FloatingToolbarView.render(); }
+		}
+	}
+
+	// ── display-mode dropdown (one toolbar button -> a popout list of modes) ─────
+	// A flow-styled dropdown (reuses the flow toolbar's own popup + list-item classes, so it matches the
+	// Cards / Layout menus) anchored under the display-mode button. Each row is the mode's icon + label;
+	// the current mode is marked. Picking one sets the style and closes. Scales to any number of modes.
+	openDisplayMenu(pAnchor)
+	{
+		if (this._DisplayMenuEl) { this.closeDisplayMenu(); return; }
+		if (typeof document === 'undefined') { return; }
+		let tmpIcons = (this._FlowView && this._FlowView._IconProvider) ? this._FlowView._IconProvider : null;
+		let tmpCurrent = this._displayStyle();
+		let tmpMenu = document.createElement('div');
+		tmpMenu.className = 'pict-flow-toolbar-popup mb-display-menu';
+		let tmpHTML = '';
+		for (let i = 0; i < _DISPLAY_MODES.length; i++)
+		{
+			let tmpMode = _DISPLAY_MODES[i];
+			let tmpIconHTML = tmpIcons ? tmpIcons.getIconSVGMarkup(tmpMode.Icon, 16) : '';
+			let tmpCurrentClass = (tmpMode.Key === tmpCurrent) ? ' mb-display-menu-current' : '';
+			tmpHTML += '<div class="pict-flow-popup-list-item mb-display-menu-item' + tmpCurrentClass + '" onclick="_Pict.views[\'' + this.options.ViewIdentifier + '\'].pickDisplayStyle(\'' + tmpMode.Key + '\')">'
+				+ '<span class="pict-flow-popup-list-item-icon">' + tmpIconHTML + '</span>'
+				+ '<span class="pict-flow-popup-list-item-label">' + tmpMode.Label + '<span class="mb-display-menu-hint">' + tmpMode.Hint + '</span></span>'
+				+ '</div>';
+		}
+		tmpMenu.innerHTML = tmpHTML;
+		document.body.appendChild(tmpMenu);
+		this._DisplayMenuEl = tmpMenu;
+		// Anchor it under the button (position:fixed; the popup CSS default is absolute, overridden inline).
+		tmpMenu.style.position = 'fixed';
 		if (pAnchor && typeof pAnchor.getBoundingClientRect === 'function')
 		{
 			let tmpRect = pAnchor.getBoundingClientRect();
 			let tmpViewportWidth = (typeof window !== 'undefined' && window.innerWidth) ? window.innerWidth : 1024;
-			let tmpLeft = Math.max(8, Math.min(tmpRect.left, tmpViewportWidth - 184));
-			tmpPopover.style.left = tmpLeft + 'px';
-			tmpPopover.style.top = (tmpRect.bottom + 6) + 'px';
+			let tmpLeft = Math.max(8, Math.min(tmpRect.left, tmpViewportWidth - 252));
+			tmpMenu.style.left = tmpLeft + 'px';
+			tmpMenu.style.top = (tmpRect.bottom + 4) + 'px';
 		}
-		this._wireBackgroundDismiss();
+		this._wireDisplayMenuDismiss(pAnchor);
 	}
 
-	closeBackgroundPopover()
+	pickDisplayStyle(pStyle)
 	{
-		let tmpRoot = document.getElementById('MB-Root-' + this.options.ViewIdentifier);
-		if (tmpRoot) { tmpRoot.classList.remove('mb-bgpop-open'); }
-		this._unwireBackgroundDismiss();
+		this.closeDisplayMenu();
+		this.setDisplayStyle(pStyle);
 	}
 
-	// Outside-click + Escape dismissal for the background popover. Window-level events with no inline
-	// equivalent, so addEventListener is the documented exception; torn down on close.
-	_wireBackgroundDismiss()
+	closeDisplayMenu()
 	{
-		if (this._BgDismissWired) { return; }
+		if (this._DisplayMenuEl && this._DisplayMenuEl.parentNode) { this._DisplayMenuEl.parentNode.removeChild(this._DisplayMenuEl); }
+		this._DisplayMenuEl = null;
+		this._unwireDisplayMenuDismiss();
+	}
+
+	// Outside-click + Escape dismissal for the display-mode dropdown (window-level events with no inline
+	// equivalent; torn down on close). Ignores clicks on the trigger button (its onclick toggles).
+	_wireDisplayMenuDismiss(pAnchor)
+	{
+		if (this._DisplayMenuDismissWired) { return; }
 		let tmpSelf = this;
-		this._boundBgOutside = this._boundBgOutside || function (pEvent)
+		this._boundDisplayMenuOutside = function (pEvent)
 		{
-			let tmpPopover = document.getElementById('MB-BgPopover-' + tmpSelf.options.ViewIdentifier);
-			if (tmpPopover && tmpPopover.contains(pEvent.target)) { return; }
-			// The Background toolbar button toggles, so ignore clicks on it here (its onclick closes).
-			if (pEvent.target && pEvent.target.closest && pEvent.target.closest('[data-extra-hash="mb-background"]')) { return; }
-			tmpSelf.closeBackgroundPopover();
+			if (tmpSelf._DisplayMenuEl && tmpSelf._DisplayMenuEl.contains(pEvent.target)) { return; }
+			if (pAnchor && pEvent.target && pAnchor.contains && pAnchor.contains(pEvent.target)) { return; }
+			if (pEvent.target && pEvent.target.closest && pEvent.target.closest('[data-extra-hash="mb-display"]')) { return; }
+			tmpSelf.closeDisplayMenu();
 		};
-		this._boundBgEsc = this._boundBgEsc || function (pEvent) { if (pEvent.key === 'Escape') { tmpSelf.closeBackgroundPopover(); } };
-		// Defer the outside-click wire so the opening click does not immediately dismiss it.
-		if (typeof setTimeout === 'function') { setTimeout(function () { if (tmpSelf._BgDismissWired) { document.addEventListener('mousedown', tmpSelf._boundBgOutside); } }, 0); }
-		document.addEventListener('keydown', this._boundBgEsc);
-		this._BgDismissWired = true;
+		this._boundDisplayMenuEsc = function (pEvent) { if (pEvent.key === 'Escape') { tmpSelf.closeDisplayMenu(); } };
+		if (typeof setTimeout === 'function') { setTimeout(function () { if (tmpSelf._DisplayMenuDismissWired) { document.addEventListener('mousedown', tmpSelf._boundDisplayMenuOutside); } }, 0); }
+		document.addEventListener('keydown', this._boundDisplayMenuEsc);
+		this._DisplayMenuDismissWired = true;
 	}
 
-	_unwireBackgroundDismiss()
+	_unwireDisplayMenuDismiss()
 	{
-		if (!this._BgDismissWired) { return; }
-		if (this._boundBgOutside) { document.removeEventListener('mousedown', this._boundBgOutside); }
-		if (this._boundBgEsc) { document.removeEventListener('keydown', this._boundBgEsc); }
-		this._BgDismissWired = false;
+		if (!this._DisplayMenuDismissWired) { return; }
+		if (this._boundDisplayMenuOutside) { document.removeEventListener('mousedown', this._boundDisplayMenuOutside); }
+		if (this._boundDisplayMenuEsc) { document.removeEventListener('keydown', this._boundDisplayMenuEsc); }
+		this._DisplayMenuDismissWired = false;
 	}
 
-	// A board is editable unless the host opts out with Editable:false (a read-only display: a
-	// teammate's profile, a hub thumbnail).
-	_isEditable() { return this.options.Editable !== false; }
+	// The gear "Appearance" section (rendered into the flow toolbar's native settings popup via the flow's
+	// SettingsSections hook): the board canvas color, plus the backdrop top margin when the background style
+	// is chosen. Built at open time so it reflects live state. No bespoke popover -- it reuses the flow's
+	// own gear popup styling.
+	_buildAppearanceSection()
+	{
+		let tmpViewID = this.options.ViewIdentifier;
+		let tmpColor = this._boardBackground() || '';
+		let tmpSwatches = _BACKGROUND_COLORS.map((pColor) =>
+			'<button class="mb-gear-swatch" style="background:' + pColor + '" title="Board color ' + pColor + '" onclick="_Pict.views[\'' + tmpViewID + '\'].setBackgroundColor(\'' + pColor + '\')"></button>').join('');
+		let tmpHTML = '<div class="mb-gear-field"><span class="mb-gear-sub">Board color</span><div class="mb-gear-swatches">'
+			+ tmpSwatches
+			+ '<input type="color" class="mb-gear-color" title="Pick a color" value="' + (tmpColor || '#ffffff') + '" onchange="_Pict.views[\'' + tmpViewID + '\'].setBackgroundColor(this.value)">'
+			+ '<button class="mb-gear-swatch mb-gear-none" title="No background" onclick="_Pict.views[\'' + tmpViewID + '\'].setBackgroundColor(\'\')"></button>'
+			+ '</div></div>';
+		// The backdrop top margin only matters for the background display style.
+		if (this._displayStyle() === 'background')
+		{
+			tmpHTML += '<div class="mb-gear-field"><span class="mb-gear-sub">Backdrop top margin</span>'
+				+ '<input type="number" class="mb-gear-margin" min="0" max="400" step="8" value="' + this._displayTopMargin() + '" onchange="_Pict.views[\'' + tmpViewID + '\'].setDisplayMargin(this.value)"></div>';
+		}
+		return tmpHTML;
+	}
+
+	// ── view-area frame (the box jumbotron / background fit the WIDTH of) ─────────
+	// The frame is native to pict-section-flow (ViewState.Frame); these delegate to the flow and persist
+	// (the frame rides ViewState through getBoard / setBoard, and a frame drag also fires the flow's
+	// onFlowChanged which the moodboard re-emits for autosave).
+	setFrame(pFrame)
+	{
+		if (!this._FlowView || typeof this._FlowView.setFrame !== 'function') { return null; }
+		let tmpFrame = this._FlowView.setFrame(pFrame);
+		if (this._isPresentationStyle()) { this.fitBoard(); }
+		this._emitChange();
+		return tmpFrame;
+	}
+
+	getFrame() { return (this._FlowView && typeof this._FlowView.getFrame === 'function') ? this._FlowView.getFrame() : null; }
+
+	setFrameEditing(pEnabled)
+	{
+		if (!this._FlowView || typeof this._FlowView.setFrameEditing !== 'function') { return false; }
+		this._FrameEditing = !!pEnabled;
+		return this._FlowView.setFrameEditing(this._FrameEditing);
+	}
+
+	// Ensure a view-area frame exists, seeding one from the content bounds when the board has none. The
+	// seeded frame is what a presentation style fits to (and what the "set view area" handles edit).
+	_ensureFrame()
+	{
+		if (!this._FlowView) { return null; }
+		let tmpFrame = (typeof this._FlowView.getFrame === 'function') ? this._FlowView.getFrame() : null;
+		if (tmpFrame && tmpFrame.Width && tmpFrame.Height) { return tmpFrame; }
+		let tmpNodes = (this._FlowView._FlowData && Array.isArray(this._FlowView._FlowData.Nodes)) ? this._FlowView._FlowData.Nodes : [];
+		let tmpSeed = PictViewMoodboard.computeContentFrame(tmpNodes, 40);
+		if (typeof this._FlowView.setFrame === 'function') { this._FlowView.setFrame(tmpSeed); }
+		return tmpSeed;
+	}
+
+	// The "set view area" toolbar toggle (edit mode): seed a frame from the content if none exists, then
+	// turn the flow's frame drag-handles on / off so the author can size the box jumbotron / background
+	// fit to. The handles + the dashed frame guide only show on an editable canvas board.
+	toggleFrameEditing()
+	{
+		if (!this._FlowView || !this._isEditable()) { return; }
+		let tmpOn = !this._FrameEditing;
+		if (tmpOn) { this._ensureFrame(); }
+		this.setFrameEditing(tmpOn);
+		this._updateFrameButton();
+	}
+
+	_updateFrameButton()
+	{
+		if (!this._FlowView || !this._FlowView._ToolbarView) { return; }
+		let tmpButtons = this._FlowView.options.ToolbarExtraButtons || [];
+		let tmpButton = tmpButtons.find((pButton) => pButton.Hash === 'mb-frame');
+		if (!tmpButton) { return; }
+		if (tmpButton.Active === this._FrameEditing) { return; }
+		tmpButton.Active = this._FrameEditing;
+		if (typeof this._FlowView._ToolbarView.render === 'function') { this._FlowView._ToolbarView.render(); }
+		if (this._FlowView._ToolbarView._FloatingToolbarView && typeof this._FlowView._ToolbarView._FloatingToolbarView.render === 'function') { this._FlowView._ToolbarView._FloatingToolbarView.render(); }
+	}
+
+	// Pure: a view-area frame enclosing every node box plus a uniform padding (a sensible default box for
+	// an empty board). No DOM, so it is unit tested.
+	static computeContentFrame(pNodes, pPadding)
+	{
+		let tmpPadding = (typeof pPadding === 'number') ? pPadding : 40;
+		let tmpNodes = Array.isArray(pNodes) ? pNodes : [];
+		if (tmpNodes.length === 0)
+		{
+			return { X: 0, Y: 0, Width: 960, Height: 540, Enabled: true };
+		}
+		let tmpMinX = Infinity, tmpMinY = Infinity, tmpMaxX = -Infinity, tmpMaxY = -Infinity;
+		for (let i = 0; i < tmpNodes.length; i++)
+		{
+			let tmpNode = tmpNodes[i] || {};
+			let tmpX = (typeof tmpNode.X === 'number') ? tmpNode.X : 0;
+			let tmpY = (typeof tmpNode.Y === 'number') ? tmpNode.Y : 0;
+			let tmpW = (typeof tmpNode.Width === 'number') ? tmpNode.Width : 0;
+			let tmpH = (typeof tmpNode.Height === 'number') ? tmpNode.Height : 0;
+			tmpMinX = Math.min(tmpMinX, tmpX);
+			tmpMinY = Math.min(tmpMinY, tmpY);
+			tmpMaxX = Math.max(tmpMaxX, tmpX + tmpW);
+			tmpMaxY = Math.max(tmpMaxY, tmpY + tmpH);
+		}
+		return {
+			X: Math.round(tmpMinX - tmpPadding),
+			Y: Math.round(tmpMinY - tmpPadding),
+			Width: Math.round((tmpMaxX - tmpMinX) + tmpPadding * 2),
+			Height: Math.round((tmpMaxY - tmpMinY) + tmpPadding * 2),
+			Enabled: true
+		};
+	}
+
+	// Pure: the on-screen height of a width-fit frame at a given container width (frame.Height scaled by
+	// container / frame width). A host sizes a jumbotron band to this. No DOM, so it is unit tested.
+	static computeScaledFrameHeight(pFrame, pContainerWidth)
+	{
+		if (!pFrame || !pFrame.Width || !pFrame.Height || !pContainerWidth) { return 0; }
+		return Math.round(pFrame.Height * (pContainerWidth / pFrame.Width));
+	}
+
+	// The current jumbotron band height for this board's container width (the scaled frame height). A
+	// host can read this to size a hero band; returns 0 when there is no frame / canvas yet.
+	jumbotronHeight()
+	{
+		let tmpFrame = this.getFrame();
+		let tmpWidth = 0;
+		if (this._FlowView && this._FlowView._SVGElement && typeof this._FlowView._SVGElement.getBoundingClientRect === 'function')
+		{
+			tmpWidth = this._FlowView._SVGElement.getBoundingClientRect().width;
+		}
+		return PictViewMoodboard.computeScaledFrameHeight(tmpFrame, tmpWidth);
+	}
 
 	_ensureFlowView()
 	{
@@ -660,6 +1137,13 @@ class PictViewMoodboard extends libPictView
 					// ONE toolbar -- the flow's own. The card palette ("Cards") is the add path (editable
 					// only); delete, zoom, fit, fullscreen, dock/float, and collapse come free. Node-adding
 					// (the "Node" button) and layouts stay off; the gear and layout group are hidden in CSS.
+					// Flow 2.0 moodboard profile: undirected links, edge-to-edge cards (no title
+					// bar), wheel pans / ctrl+wheel zooms (the scroll-too-fast fix), and a flat
+					// canvas background. ReadOnly drives the flow's native non-editable mode
+					// (interaction gating + chrome hiding) for display boards, replacing the old
+					// mb-readonly CSS reliance.
+					Profile: 'moodboard',
+					ReadOnly: !tmpEditable,
 					EnableToolbar: true,
 					EnableCardPalette: tmpEditable,
 					EnableAddNode: false,
@@ -683,10 +1167,14 @@ class PictViewMoodboard extends libPictView
 					NodeTypes: tmpNodeTypes,
 					// Double-click a link to style it (color, width, line style, the marker at each end, a label).
 					ConnectionPropertiesPanel: _CONNECTION_PANEL,
-					// Host-facing toolbar buttons: the moodboard's Background button (editable only) plus
-					// whatever the host supplies (Edit / Done). Clicks route through onToolbarButton below.
+					// Host-facing toolbar buttons: the moodboard's editing controls (display-style toggle,
+					// set-view-area, connections; editable only) plus whatever the host supplies (Edit /
+					// Done). Clicks route through onToolbarButton below.
 					ToolbarExtraButtons: this._buildToolbarButtons(tmpEditable),
 					onToolbarButton: (pHash, pElement) => this.onToolbarButton(pHash, pElement),
+					// The board color + backdrop margin live in the flow toolbar's own gear popup (no bespoke
+					// box) via the flow's SettingsSections hook; built at open time so it reflects live state.
+					SettingsSections: [ { Label: 'Appearance', Build: () => this._buildAppearanceSection() } ],
 					Renderables: [ { RenderableHash: 'Flow-Container', TemplateHash: 'Flow-Container-Template', DestinationAddress: tmpContainer, RenderMethod: 'replace' } ]
 				},
 				libPictSectionFlow);
@@ -1463,11 +1951,29 @@ class PictViewMoodboard extends libPictView
 			this._PendingBoard = null;
 			this._FlowView.setFlowData(pBoard);
 			this._FlowView.renderFlow();
-			this._applyBackgroundSoon();
-			this._fitSoon();
+			this._afterBoardApplied();
 			return;
 		}
 		if (this._FlowView) { this._applyPendingBoard(); }
+	}
+
+	// Shared tail for both board-load paths: re-establish the display style (a loaded presentation board
+	// flips to read-only width-fit, so rebuild the chrome; a canvas board just re-applies cheaply), paint
+	// the background, and fit. setFlowData does not fire onFlowChanged, so loading stays save-silent.
+	_afterBoardApplied()
+	{
+		if (this._isPresentationStyle())
+		{
+			// Rebuild the moodboard chrome for the read-only presentation mode; onAfterRender's
+			// _applyDisplayStyle establishes the flow FitMode / frame / observer + paints the background.
+			this.render();
+		}
+		else
+		{
+			this._applyDisplayStyle();
+			this._applyBackgroundSoon();
+		}
+		this._fitSoon();
 	}
 
 	// Fit the board's content into view on mount (both modes) so nothing is clipped and you never land
@@ -1494,7 +2000,7 @@ class PictViewMoodboard extends libPictView
 			{
 				let tmpBoard = tmpSelf._PendingBoard;
 				tmpSelf._PendingBoard = null;
-				try { tmpSelf._FlowView.setFlowData(tmpBoard); tmpSelf._FlowView.renderFlow(); tmpSelf._applyBackgroundSoon(); tmpSelf._fitSoon(); }
+				try { tmpSelf._FlowView.setFlowData(tmpBoard); tmpSelf._FlowView.renderFlow(); tmpSelf._afterBoardApplied(); }
 				catch (pErr) { /* flow torn down mid-flight */ }
 				return;
 			}
@@ -1520,7 +2026,10 @@ class PictViewMoodboard extends libPictView
 			document.removeEventListener('keydown', this._boundOnConnectKey);
 			this._ConnectKeyWired = false;
 		}
-		this._unwireBackgroundDismiss();
+		// Drop the flow's width-fit ResizeObserver (a presentation board installs one) so it does not
+		// outlive the view.
+		if (this._FlowView && typeof this._FlowView._teardownFitObserver === 'function') { this._FlowView._teardownFitObserver(); }
+		this.closeDisplayMenu();
 	}
 }
 

@@ -62,7 +62,26 @@ class MoodboardDemoApplication extends libPictApplication
 	constructor(pFable, pOptions, pServiceHash)
 	{
 		super(pFable, pOptions, pServiceHash);
-		this.pict.addView('Moodboard', Object.assign({}, libMoodboard.default_configuration, { ImageSource: _GALLERY }), libMoodboard);
+		// The edit / view toggle is a HOST control (the page's "Edit board" / "Done" button), NOT a flow
+		// toolbar button -- a presentation board hides the flow toolbar, so a toggle inside it would be
+		// unreachable once you switch to view. The display-style toggle + set-view-area live in the
+		// moodboard's own edit toolbar; the board color + backdrop margin live in its gear. No host chrome
+		// beyond the one Edit button.
+		this.pict.addView('Moodboard', Object.assign({}, libMoodboard.default_configuration,
+			{
+				ImageSource: _GALLERY,
+				// The host sizes the board's container for the current presentation: a jumbotron is a hero
+				// band (its scaled frame height), a background a tall backdrop, the canvas the normal box.
+				// This is the host's job -- only it knows the board should be a banner vs. a full section.
+				onDisplayStyleChanged: function (pInfo)
+				{
+					let tmpContainer = (typeof document !== 'undefined') ? document.getElementById('Moodboard-Container') : null;
+					if (!tmpContainer) { return; }
+					if (pInfo.effectiveStyle === 'jumbotron') { tmpContainer.style.height = (pInfo.jumbotronHeight > 0 ? pInfo.jumbotronHeight : 320) + 'px'; }
+					else if (pInfo.effectiveStyle === 'background') { tmpContainer.style.height = '88vh'; }
+					else { tmpContainer.style.height = '70vh'; }
+				}
+			}), libMoodboard);
 	}
 
 	onAfterInitializeAsync(fCallback)

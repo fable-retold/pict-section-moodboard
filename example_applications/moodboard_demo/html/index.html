@@ -6,11 +6,32 @@
 	<title>Moodboard Demo</title>
 	<style>
 		html, body { height: 100%; margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-		#Moodboard-Container { height: 100vh; }
+		/* The board lives in a host "page" so the jumbotron band / background backdrop read against real
+		   page content above + below them (matching how an app embeds a board). */
+		#Demo-Page { min-height: 100vh; display: flex; flex-direction: column; }
+		#Demo-Header { padding: 14px 20px; position: relative; }
+		#Demo-Header h1 { margin: 0; font-size: 18px; color: #1d2230; }
+		#Demo-Header p { margin: 4px 0 0; font-size: 13px; color: #5b6376; max-width: 760px; }
+		/* The host's Edit / Done toggle, like an app would own (outside the board so it stays reachable in
+		   a presentation style where the flow toolbar is hidden). */
+		#Demo-Edit { position: absolute; top: 14px; right: 20px; padding: 6px 14px; border: 1px solid #2880a6; border-radius: 7px; background: #2880a6; color: #fff; cursor: pointer; font-size: 13px; }
+		#Moodboard-Container { height: 70vh; }
+		#Demo-Body { padding: 18px 20px 40px; color: #3a4250; line-height: 1.5; max-width: 760px; }
 	</style>
 </head>
 <body>
-	<div id="Moodboard-Container"></div>
+	<div id="Demo-Page">
+		<div id="Demo-Header">
+			<button id="Demo-Edit" onclick="demoToggleEdit()">Done</button>
+			<h1>Moodboard presentation styles</h1>
+			<p>"Edit board" / "Done" toggles edit and view. In edit mode the toolbar carries the display-style toggle (canvas / jumbotron / background) and "set view area"; the gear holds the board color + backdrop margin. Pick a style, then click Done to view it.</p>
+		</div>
+		<div id="Moodboard-Container"></div>
+		<div id="Demo-Body">
+			<p>This paragraph is host page content below the board. A <strong>jumbotron</strong> clips the board to a hero band whose height is the view-area frame scaled to the page width. A <strong>background</strong> fills the board container as a full-width backdrop (honoring the top margin), and a tall board lets the page scroll. The content fills the <em>width of the defined view area</em>, bleeding past its edges rather than fitting the content bounding box.</p>
+		</div>
+	</div>
+
 	<script src="./js/pict.min.js"></script>
 	<script src="./moodboard_demo.min.js"></script>
 	<script>
@@ -18,6 +39,19 @@
 		{
 			Pict.safeLoadPictApplication(window.MoodboardDemo, 1);
 		});
+
+		// Host-owned Edit / Done toggle (drives the moodboard's setEditable). Stays reachable in a
+		// presentation style where the flow's own toolbar is hidden.
+		function demoToggleEdit()
+		{
+			var tmpBoard = (typeof _Pict !== 'undefined' && _Pict.views) ? _Pict.views.Moodboard : null;
+			if (!tmpBoard) { return; }
+			var tmpEditable = !tmpBoard._isEditable();
+			tmpBoard.setEditable(tmpEditable);
+			var tmpButton = document.getElementById('Demo-Edit');
+			if (tmpButton) { tmpButton.textContent = tmpEditable ? 'Done' : 'Edit board'; }
+		}
+		window.demoToggleEdit = demoToggleEdit;
 	</script>
 </body>
 </html>
