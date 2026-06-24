@@ -242,7 +242,7 @@ const _ViewConfiguration =
 		   stay hidden either way -- moodboard ports are unlabeled anchors. */
 		.pict-flow-node-MoodImage .pict-flow-port-label, .pict-flow-node-MoodNote .pict-flow-port-label, .pict-flow-node-MoodText .pict-flow-port-label, .pict-flow-node-MoodSticker .pict-flow-port-label { display: none; }
 		.mb-readonly .pict-flow-port { display: none; }
-		.mb-image { width: 100%; height: 100%; display: block; border-radius: 8px; }
+		.mb-image { width: 100%; height: 100%; display: block; border-radius: 8px; object-fit: cover; }
 		.mb-image-cover { object-fit: cover; }
 		.mb-image-contain { object-fit: contain; }
 		.mb-note { width: 100%; height: 100%; box-sizing: border-box; padding: 10px; font-family: inherit; font-size: 13px; line-height: 1.35; color: #3a3320; overflow: hidden; white-space: pre-wrap; word-break: break-word; }
@@ -1433,6 +1433,7 @@ class PictViewMoodboard extends libPictView
 			this._FlowView.selectNode(tmpNode.Hash);
 			this._FlowView.renderFlow();
 			this._FlowView.marshalFromView();
+			this._sizeCardToImage(tmpNode.Hash, pUrl);
 		}
 		if (this._galleryState().Open) { this._refreshGalleryGrid(); }
 	}
@@ -1608,10 +1609,50 @@ class PictViewMoodboard extends libPictView
 		if (!tmpNode) return;
 		if (!tmpNode.Data) tmpNode.Data = {};
 		tmpNode.Data.ImageUrl = pUrl;
+		// A card picked or uploaded into may never have had a Fit set, and .mb-image carries no default
+		// object-fit, so the picture used to stretch to the box. Default it to cover and size the tile
+		// to the photo's own shape.
+		if (!tmpNode.Data.Fit) { tmpNode.Data.Fit = 'cover'; }
 		let tmpImg = this._cardElement(pNodeHash, '.mb-image');
-		if (tmpImg) { tmpImg.setAttribute('src', pUrl || ''); }
+		if (tmpImg) { tmpImg.setAttribute('src', pUrl || ''); tmpImg.className = 'mb-image mb-image-' + tmpNode.Data.Fit; }
+		this._sizeCardToImage(pNodeHash, pUrl);
 		this._FlowView.marshalFromView();
 		this._emitChange();
+	}
+
+	// Resize an image card to its picture's natural aspect ratio so the photo is not squished into the
+	// fixed default box. Loads the image off-screen to read its dimensions, then (only for a card still
+	// at the image default footprint, so a tile the user has deliberately sized keeps its shape) sets
+	// Width/Height to the same aspect with the long side at a sensible size, and re-renders.
+	_sizeCardToImage(pNodeHash, pUrl)
+	{
+		if (typeof Image === 'undefined' || !pUrl) { return; }
+		let tmpSelf = this;
+		let tmpProbe = new Image();
+		tmpProbe.onload = function ()
+		{
+			let tmpNaturalW = tmpProbe.naturalWidth, tmpNaturalH = tmpProbe.naturalHeight;
+			if (!tmpNaturalW || !tmpNaturalH || !tmpSelf._FlowView) { return; }
+			let tmpNode = tmpSelf._FlowView.getNode(pNodeHash);
+			if (!tmpNode) { return; }
+			// Only auto-fit a card still at the MoodImage default (240x200); respect a resized tile.
+			if (Number(tmpNode.Width) !== 240 || Number(tmpNode.Height) !== 200) { return; }
+			let tmpLong = 280;
+			if (tmpNaturalW >= tmpNaturalH)
+			{
+				tmpNode.Width = tmpLong;
+				tmpNode.Height = Math.max(80, Math.round(tmpLong * tmpNaturalH / tmpNaturalW));
+			}
+			else
+			{
+				tmpNode.Height = tmpLong;
+				tmpNode.Width = Math.max(80, Math.round(tmpLong * tmpNaturalW / tmpNaturalH));
+			}
+			if (typeof tmpSelf._FlowView.renderFlow === 'function') { tmpSelf._FlowView.renderFlow(); }
+			tmpSelf._FlowView.marshalFromView();
+			tmpSelf._emitChange();
+		};
+		tmpProbe.src = pUrl;
 	}
 
 	setStickerUrl(pNodeHash, pUrl, pMeta)
