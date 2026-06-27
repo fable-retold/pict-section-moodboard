@@ -530,7 +530,19 @@ class PictViewMoodboard extends libPictView
 			if (typeof this._FlowView.fitToWidth === 'function') { this._FlowView.fitToWidth(); }
 			return;
 		}
-		if (typeof this._FlowView.zoomToFit === 'function') { this._FlowView.zoomToFit(); }
+		// A read-only presentation that opts in (options.FitZoomIn -- e.g. a profile / vision banner framing
+		// its content) lets the fit scale a small board UP to fill the banner. The editable canvas and every
+		// other consumer keep the historic "never zoom in past 1.0" fit so a sparse board stays true-to-scale.
+		let tmpAllowZoomIn = (this.options.FitZoomIn === true) && !this._isEditable();
+		if (typeof this._FlowView.zoomToFit === 'function') { this._FlowView.zoomToFit(tmpAllowZoomIn); }
+	}
+
+	// True once a board set via setBoard has finished applying to the live flow (not still pending nor
+	// mid-mount). A host reads this before capturing getBoard() on a fast open->close so it never persists a
+	// not-yet-loaded (empty) board over real content.
+	isBoardReady()
+	{
+		return !!(this._FlowView && this._FlowView.initialRenderComplete && !this._PendingBoard);
 	}
 
 	// ── flow toolbar custom buttons (background + the host's Edit / Done) ──────
