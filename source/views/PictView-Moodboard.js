@@ -224,7 +224,17 @@ const _ViewConfiguration =
 		/* Display-mode dropdown: one toolbar button opens this list of modes. Reuses the flow toolbar's own
 		   popup + list-item classes (so it matches the Cards / Layout menus); these just add the per-row
 		   hint line and the current-mode mark. */
-		.mb-display-menu { min-width: 234px; }
+		/* The menu is appended to document.body (outside .pict-flow), so the flow popup's --pf-* vars are
+		   undefined there and its background resolves to transparent. Re-supply the vars it reads so its own
+		   panel background, border, and text colors apply at body level. */
+		.mb-display-menu
+		{
+			min-width: 234px;
+			--pf-panel-bg: var(--theme-color-background-panel, #ffffff);
+			--pf-card-border: var(--theme-color-border-default, #dfe3ea);
+			--pf-text: var(--theme-color-text-primary, #1f2733);
+			--pf-hover-bg: var(--theme-color-background-secondary, #eef2f7);
+		}
 		.mb-display-menu .pict-flow-popup-list-item-label { display: flex; flex-direction: column; line-height: 1.25; font-weight: 600; }
 		.mb-display-menu-hint { font-size: 11px; font-weight: 400; color: var(--theme-color-text-secondary, #8a93a5); }
 		.mb-display-menu-current { background: var(--theme-color-background-secondary, #eef2f7); }
@@ -490,7 +500,7 @@ class PictViewMoodboard extends libPictView
 					// frame) is width-fit, and the flow's own ResizeObserver owns re-fitting it, so the
 					// moodboard does NOT contain-fit on resize (that would fight the width-fit). Only an
 					// unframed read-only canvas re-fits here.
-					if (this._isPresentationStyle() || this._hasViewAreaFrame()) { return; }
+					if (this._isPresentationStyle()) { return; }
 					this.fitBoard();
 				});
 				window.addEventListener('resize', this._boundOnResize);
@@ -525,10 +535,13 @@ class PictViewMoodboard extends libPictView
 	fitBoard()
 	{
 		if (!this._FlowView) { return; }
-		if (!this._isEditable() && this._hasViewAreaFrame())
+		// Presentation styles (jumbotron / background) fit the WIDTH of the view-area frame -- that frame IS
+		// the crop the author chose. A plain canvas always fits its CONTENT (zoom to fill), even if a frame
+		// was drawn, so a viewer sees the whole board zoomed in rather than the content tiny inside an unused
+		// frame.
+		if (!this._isEditable() && this._isPresentationStyle())
 		{
-			if (typeof this._FlowView.fitToWidth === 'function') { this._FlowView.fitToWidth(); }
-			return;
+			if (typeof this._FlowView.fitToWidth === 'function') { this._FlowView.fitToWidth(); return; }
 		}
 		// A read-only presentation that opts in (options.FitZoomIn -- e.g. a profile / vision banner framing
 		// its content) lets the fit scale a small board UP to fill the banner. The editable canvas and every
@@ -633,8 +646,9 @@ class PictViewMoodboard extends libPictView
 			tmpSelf._syncToolbarButtons(tmpToolbar);
 			if (!tmpSelf._isEditable() && typeof tmpToolbar._setToolbarMode === 'function')
 			{
-				// Read-only shows a minimal docked toolbar so the pan/zoom (hand) toggle is always visible.
-				if (tmpToolbar._ToolbarMode !== 'docked') { tmpToolbar._setToolbarMode('docked'); }
+				// Read-only starts COLLAPSED: the toolbar tucks into the corner and fades in on hover (see the
+				// .mb-readonly .pict-flow-toolbar-collapsed CSS), so a view-mode board is clean by default.
+				if (tmpToolbar._ToolbarMode !== 'collapsed') { tmpToolbar._setToolbarMode('collapsed'); }
 			}
 		};
 		if (typeof requestAnimationFrame === 'function') { requestAnimationFrame(fSetup); } else { setTimeout(fSetup, 50); }
@@ -2239,6 +2253,12 @@ class PictViewMoodboard extends libPictView
 	// the background, and fit. setFlowData does not fire onFlowChanged, so loading stays save-silent.
 	_afterBoardApplied()
 	{
+		// A board (re)load is often the host swapping our read-only <-> editable instance. Each instance keeps
+		// its own display-style de-dup key, so the editable instance can stay SILENT about being 'canvas'
+		// while the host is still laid out for the read-only instance's 'background' backdrop -- leaving the
+		// detail content over the editor (z-index -1) and swallowing clicks on the board. Clear the key so the
+		// effective style is reported fresh on every board load and the host re-lays-out for this instance.
+		this._LastDisplayStyleKey = null;
 		if (this._isPresentationStyle())
 		{
 			// Rebuild the moodboard chrome for the read-only presentation mode; onAfterRender's
@@ -2251,6 +2271,35 @@ class PictViewMoodboard extends libPictView
 			this._applyBackgroundSoon();
 		}
 		this._fitSoon();
+		this._fullscreenOnEditSoon();
+	}
+
+	// Auto-enter the flow's fullscreen when an editable board mounts and the host asked for it
+	// (options.FullscreenOnEdit) -- editing a whiteboard is a focused, full-viewport activity. Deferred and
+	// polled so the flow wrapper exists; skipped if already fullscreen (a re-applied board) so it does not
+	// toggle back out. Leaving edit unmounts this instance (the host swaps in the read-only view), which
+	// drops the .pict-flow-fullscreen wrapper class, so there is nothing to unwind here.
+	_fullscreenOnEditSoon()
+	{
+		if (!(this.options.FullscreenOnEdit && this._isEditable() && this._FlowView)) { return; }
+		let tmpSelf = this;
+		let tmpTries = 0;
+		let fGo = function ()
+		{
+			if (!tmpSelf._isEditable() || !tmpSelf._FlowView || tmpSelf._FlowView._IsFullscreen) { return; }
+			let tmpWrapper = (typeof document !== 'undefined') ? document.getElementById('Flow-Wrapper-' + tmpSelf._FlowView.options.ViewIdentifier) : null;
+			if (!tmpWrapper)
+			{
+				if (++tmpTries < 60 && typeof requestAnimationFrame === 'function') { requestAnimationFrame(fGo); }
+				return;
+			}
+			if (typeof tmpSelf._FlowView.toggleFullscreen === 'function')
+			{
+				tmpSelf._FlowView.toggleFullscreen();
+				tmpSelf.fitBoard();
+			}
+		};
+		if (typeof requestAnimationFrame === 'function') { requestAnimationFrame(fGo); } else { setTimeout(fGo, 32); }
 	}
 
 	// Fit the board's content into view on mount (both modes) so nothing is clipped and you never land

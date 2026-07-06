@@ -202,15 +202,18 @@ function ()
 	// configured visible area), everything else contains every card (zoomToFit). This is the "view mode
 	// respects the configured visible area" rule -- it holds for a plain canvas, not just a jumbotron /
 	// background, which is the whole point of letting people frame a view area on any board.
-	suite('fitBoard honors a view-area frame in view mode, whatever the display style',
+	suite('fitBoard frame-fits only a presentation style; a canvas always content-fits',
 	function ()
 	{
-		function makeFitStub(pEditable, pFrame)
+		function makeFitStub(pEditable, pFrame, pStyle)
 		{
 			let tmpCalls = [];
 			let tmpStub = makeStub(
 			{
 				options: { Editable: pEditable },
+				// The stored display style the read-only effective-style resolves to (canvas / jumbotron /
+				// background). _isPresentationStyle reads this through the real prototype methods.
+				_displayStyle: () => pStyle || 'canvas',
 				_FlowView:
 				{
 					getFrame: () => pFrame,
@@ -222,10 +225,18 @@ function ()
 			return tmpStub;
 		}
 
-		test('a read-only canvas board with a view-area frame fits the frame WIDTH (not a centered zoomToFit)',
+		test('a read-only canvas board content-fits even with a view-area frame (zoomToFit, not frame-fit)',
 		function ()
 		{
-			let tmpStub = makeFitStub(false, { Width: 1200, Height: 400 });
+			let tmpStub = makeFitStub(false, { Width: 1200, Height: 400 }, 'canvas');
+			tmpStub.fitBoard();
+			libExpect(tmpStub._fitCalls).to.deep.equal([ 'zoomToFit' ]);
+		});
+
+		test('a read-only presentation board (background) with a frame fits the frame WIDTH',
+		function ()
+		{
+			let tmpStub = makeFitStub(false, { Width: 1200, Height: 400 }, 'background');
 			tmpStub.fitBoard();
 			libExpect(tmpStub._fitCalls).to.deep.equal([ 'fitToWidth' ]);
 		});
@@ -233,15 +244,15 @@ function ()
 		test('a read-only board with no view-area frame contains every card (zoomToFit)',
 		function ()
 		{
-			let tmpStub = makeFitStub(false, null);
+			let tmpStub = makeFitStub(false, null, 'canvas');
 			tmpStub.fitBoard();
 			libExpect(tmpStub._fitCalls).to.deep.equal([ 'zoomToFit' ]);
 		});
 
-		test('an editable board contains every card even with a frame (you edit on the full canvas)',
+		test('an editable board contains every card even with a stored presentation style (you edit on the full canvas)',
 		function ()
 		{
-			let tmpStub = makeFitStub(true, { Width: 1200, Height: 400 });
+			let tmpStub = makeFitStub(true, { Width: 1200, Height: 400 }, 'background');
 			tmpStub.fitBoard();
 			libExpect(tmpStub._fitCalls).to.deep.equal([ 'zoomToFit' ]);
 		});
