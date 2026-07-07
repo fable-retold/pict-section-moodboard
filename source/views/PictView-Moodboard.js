@@ -773,30 +773,38 @@ class PictViewMoodboard extends libPictView
 	{
 		this.options.Editable = (pEditable !== false);
 		this.closeDisplayMenu();
-		if (this._FlowView)
-		{
-			// Flip the flow's read-only + edit flags up front (a canvas board follows Editable;
-			// _applyDisplayStyle re-confirms read-only for a presentation effective style after render).
-			if (typeof this._FlowView.setReadOnly === 'function') { this._FlowView.setReadOnly(!this.options.Editable); }
-			this._FlowView.options.EnableCardPalette = this.options.Editable;
-			this._FlowView.options.EnableConnectionCreation = this.options.Editable;
-			this._FlowView.options.EnableNodeDragging = this.options.Editable;
-			this._FlowView.options.EnableNodeResizing = this.options.Editable;
-			this._FlowView.options.EnableGridSnap = this.options.Editable;
-			this._FlowView.options.EnableAlignmentGuides = this.options.Editable;
-			// Swap the toolbar's extra buttons to this mode's set authoritatively, so a flow re-render does
-			// not paint the previous mode's buttons before the deferred toolbar sync catches up (the
-			// view -> edit transition otherwise kept showing the read-only navigate button).
-			let tmpButtons = this._buildToolbarButtons(this.options.Editable);
-			this._FlowView.options.ToolbarExtraButtons = tmpButtons;
-			if (this._FlowView._ToolbarView)
-			{
-				this._FlowView._ToolbarView.options.ToolbarExtraButtons = tmpButtons;
-				if (this._FlowView._ToolbarView._FloatingToolbarView) { this._FlowView._ToolbarView._FloatingToolbarView.options.ToolbarExtraButtons = tmpButtons; }
-			}
-		}
+		this._applyEditableToFlow();
 		this.render();
 		return this.options.Editable;
+	}
+
+	// Push the current options.Editable onto the flow sub-view: its read-only flag, the per-interaction
+	// enables, and the toolbar's extra-button set. Does NOT re-render the moodboard -- setEditable renders
+	// after calling this, and _afterBoardApplied re-applies the display style, so a repaint is the caller's
+	// job. Split out so a board load can re-assert the configured mode (this view is a reused singleton
+	// whose flow may still be set for a previous board) without the full re-render setEditable does.
+	_applyEditableToFlow()
+	{
+		if (!this._FlowView) { return; }
+		// Flip the flow's read-only + edit flags (a canvas board follows Editable; _applyDisplayStyle
+		// re-confirms read-only for a presentation effective style after render).
+		if (typeof this._FlowView.setReadOnly === 'function') { this._FlowView.setReadOnly(!this.options.Editable); }
+		this._FlowView.options.EnableCardPalette = this.options.Editable;
+		this._FlowView.options.EnableConnectionCreation = this.options.Editable;
+		this._FlowView.options.EnableNodeDragging = this.options.Editable;
+		this._FlowView.options.EnableNodeResizing = this.options.Editable;
+		this._FlowView.options.EnableGridSnap = this.options.Editable;
+		this._FlowView.options.EnableAlignmentGuides = this.options.Editable;
+		// Swap the toolbar's extra buttons to this mode's set authoritatively, so a flow re-render does
+		// not paint the previous mode's buttons before the deferred toolbar sync catches up (the
+		// view -> edit transition otherwise kept showing the read-only navigate button).
+		let tmpButtons = this._buildToolbarButtons(this.options.Editable);
+		this._FlowView.options.ToolbarExtraButtons = tmpButtons;
+		if (this._FlowView._ToolbarView)
+		{
+			this._FlowView._ToolbarView.options.ToolbarExtraButtons = tmpButtons;
+			if (this._FlowView._ToolbarView._FloatingToolbarView) { this._FlowView._ToolbarView._FloatingToolbarView.options.ToolbarExtraButtons = tmpButtons; }
+		}
 	}
 
 	// ── display style (canvas / jumbotron / background) ─────────────────────────
@@ -2253,6 +2261,13 @@ class PictViewMoodboard extends libPictView
 	// the background, and fit. setFlowData does not fire onFlowChanged, so loading stays save-silent.
 	_afterBoardApplied()
 	{
+		// Re-assert this instance's configured edit/read-only mode. A moodboard view is often a reused
+		// singleton (a host mounts one editable + one read-only instance across many boards), so its flow
+		// read-only + interaction flags may still be set for a previous board. Re-applying options.Editable
+		// here means a board always loads in the mode it was mounted for -- a read-only board never opens
+		// editable, and an editable one is never left read-only. _applyDisplayStyle (below) re-confirms
+		// read-only for a presentation effective style after this runs.
+		this._applyEditableToFlow();
 		// A board (re)load is often the host swapping our read-only <-> editable instance. Each instance keeps
 		// its own display-style de-dup key, so the editable instance can stay SILENT about being 'canvas'
 		// while the host is still laid out for the read-only instance's 'background' backdrop -- leaving the
@@ -2276,9 +2291,14 @@ class PictViewMoodboard extends libPictView
 
 	// Auto-enter the flow's fullscreen when an editable board mounts and the host asked for it
 	// (options.FullscreenOnEdit) -- editing a whiteboard is a focused, full-viewport activity. Deferred and
-	// polled so the flow wrapper exists; skipped if already fullscreen (a re-applied board) so it does not
-	// toggle back out. Leaving edit unmounts this instance (the host swaps in the read-only view), which
-	// drops the .pict-flow-fullscreen wrapper class, so there is nothing to unwind here.
+	// polled so the flow wrapper exists.
+	//
+	// This view is a reused singleton: a host mounts ONE editable instance across many boards and swaps it
+	// out (read-only view) on "Done" -- but that swap only wipes our container, it does not call any unmount
+	// hook, so the flow's _IsFullscreen flag survives from the previous edit while the OLD wrapper (and its
+	// .pict-flow-fullscreen class) is gone. So the flag alone is not trustworthy: reconcile it against the
+	// live DOM. If this fresh wrapper is already fullscreen we are done; if the flag is stale-true but this
+	// wrapper is not fullscreen, drop the stale flag first so the toggle actually re-enters.
 	_fullscreenOnEditSoon()
 	{
 		if (!(this.options.FullscreenOnEdit && this._isEditable() && this._FlowView)) { return; }
@@ -2286,13 +2306,18 @@ class PictViewMoodboard extends libPictView
 		let tmpTries = 0;
 		let fGo = function ()
 		{
-			if (!tmpSelf._isEditable() || !tmpSelf._FlowView || tmpSelf._FlowView._IsFullscreen) { return; }
+			if (!tmpSelf._isEditable() || !tmpSelf._FlowView) { return; }
 			let tmpWrapper = (typeof document !== 'undefined') ? document.getElementById('Flow-Wrapper-' + tmpSelf._FlowView.options.ViewIdentifier) : null;
 			if (!tmpWrapper)
 			{
 				if (++tmpTries < 60 && typeof requestAnimationFrame === 'function') { requestAnimationFrame(fGo); }
 				return;
 			}
+			let tmpWrapperFullscreen = tmpWrapper.classList.contains('pict-flow-fullscreen');
+			// Already fullscreen on this wrapper -- a re-applied board, nothing to do.
+			if (tmpSelf._FlowView._IsFullscreen && tmpWrapperFullscreen) { return; }
+			// Stale flag left true by a previous edit whose wrapper is gone: clear it so the toggle re-enters.
+			if (tmpSelf._FlowView._IsFullscreen && !tmpWrapperFullscreen && typeof tmpSelf._FlowView.exitFullscreen === 'function') { tmpSelf._FlowView.exitFullscreen(); }
 			if (typeof tmpSelf._FlowView.toggleFullscreen === 'function')
 			{
 				tmpSelf._FlowView.toggleFullscreen();
@@ -2355,6 +2380,13 @@ class PictViewMoodboard extends libPictView
 		// Drop the flow's width-fit ResizeObserver (a presentation board installs one) so it does not
 		// outlive the view.
 		if (this._FlowView && typeof this._FlowView._teardownFitObserver === 'function') { this._FlowView._teardownFitObserver(); }
+		// This view is a reusable singleton (a host swaps one editable + one read-only instance across many
+		// boards), so leave no presentation state on the shared flow. Drop out of fullscreen: the editor's
+		// FullscreenOnEdit enters it and nothing else clears it, so without this the NEXT edit sees a stale
+		// fullscreen bit (_fullscreenOnEditSoon early-returns on it) and never re-expands. Turn off the
+		// frame-edit handles and close the display menu for the same reason.
+		if (this._FlowView && typeof this._FlowView.exitFullscreen === 'function') { this._FlowView.exitFullscreen(); }
+		if (this._FrameEditing && this._FlowView && typeof this._FlowView.setFrameEditing === 'function') { this._FrameEditing = false; this._FlowView.setFrameEditing(false); }
 		this.closeDisplayMenu();
 	}
 }
