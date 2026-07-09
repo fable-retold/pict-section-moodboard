@@ -200,10 +200,12 @@ const _ViewConfiguration =
 		.mb-presentation .pict-flow-toolbar,
 		.mb-presentation .pict-flow-floating-toolbar,
 		.mb-presentation .pict-flow-toolbar-collapsed { display: none; }
-		/* pict-section-flow toggles `.pict-flow-toolbar-collapsed.visible { display: block }` on hover, which
-		   ties the collapsed-toolbar hide above on specificity (both 0,2,0) and wins on source order -- so the
-		   small "expand toolbar" button leaks onto a presentation board when the pointer is over it. Repeat the
-		   hide with the `.visible` class attached (0,3,0) so it wins outright and the button stays hidden. */
+		/* pict-section-flow toggles the collapsed toolbar visible with a .visible class on hover
+		   (.pict-flow-toolbar-collapsed.visible sets display block), which ties the collapsed-toolbar hide
+		   above on specificity (both 0,2,0) and wins on source order -- so the small "expand toolbar" button
+		   leaks onto a presentation board when the pointer is over it. Repeat the hide with the .visible class
+		   attached (0,3,0) so it wins outright and the button stays hidden. NOTE: no backticks in this comment
+		   -- the whole CSS block is a JS template literal, so a backtick here would terminate it early. */
 		.mb-presentation .pict-flow-toolbar-collapsed.visible { display: none; }
 		/* ...but once expanded to full screen, bring the docked toolbar back so its fullscreen button is
 		   the way back OUT (a presentation board has no other chrome; the host Expand control is behind the
