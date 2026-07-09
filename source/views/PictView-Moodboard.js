@@ -565,6 +565,15 @@ class PictViewMoodboard extends libPictView
 		return !!(this._FlowView && this._FlowView.initialRenderComplete && !this._PendingBoard);
 	}
 
+	// True when this board has no content to show (no cards). Pass a loaded board object to test it
+	// directly -- a host checking a just-fetched row before deciding whether to mount -- or call it with no
+	// argument to test the live board. isBoardReady reports load-completion; this reports emptiness.
+	isBoardEmpty(pBoard)
+	{
+		let tmpBoard = (typeof pBoard !== 'undefined' && pBoard !== null) ? pBoard : this.getBoard();
+		return PictViewMoodboard.boardIsEmpty(tmpBoard);
+	}
+
 	// ── flow toolbar custom buttons (background + the host's Edit / Done) ──────
 	// The moodboard contributes its editing controls (the display-style toggle, set-view-area, connections)
 	// to the flow toolbar (editable only). The host can supply more (an Edit / Done button) via
@@ -1243,6 +1252,17 @@ class PictViewMoodboard extends libPictView
 	{
 		if (!pFrame || !pFrame.Width || !pFrame.Height || !pContainerWidth) { return 0; }
 		return Math.round(pFrame.Height * (pContainerWidth / pFrame.Width));
+	}
+
+	// Pure: true when a board carries no content -- no card nodes. ViewState (pan / zoom) is not content,
+	// and a Connection joins two node ports so it cannot exist without nodes, so only Nodes decide it. A
+	// host reads this to decide whether to mount the board at all: an empty board shown read-only is just
+	// an empty box. Distinct from isBoardReady (load-completion). No DOM, so it is unit tested.
+	static boardIsEmpty(pBoard)
+	{
+		if (!pBoard) { return true; }
+		let tmpNodes = Array.isArray(pBoard.Nodes) ? pBoard.Nodes : [];
+		return tmpNodes.length === 0;
 	}
 
 	// The current jumbotron band height for this board's container width. An explicit override (the gear
