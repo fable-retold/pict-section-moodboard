@@ -416,6 +416,11 @@ class PictViewMoodboard extends libPictView
 		// A host can supply its own sticker library (options.StickerSource); otherwise the built-in source
 		// ships a small set of cutout shapes so stickers work stand-alone.
 		this._StickerSource = (pOptions && pOptions.StickerSource) ? pOptions.StickerSource : new libStickerSource();
+		// A host can supply a distinct source for the Drawing card's picker (options.DrawingSource) -- its
+		// own drawings collection (for plansheet, the team's Excalidraw drawings, plus this board's gallery).
+		// It uses the same source interface as ImageSource. Without one, the drawing picker falls back to the
+		// image source so a stand-alone board still works.
+		this._DrawingSource = (pOptions && pOptions.DrawingSource) ? pOptions.DrawingSource : null;
 		// When the library picker is opened from a card's properties panel, the chosen image / sticker is
 		// applied to THIS node (rather than adding a new card).
 		this._PickerTargetHash = null;
@@ -1800,7 +1805,7 @@ class PictViewMoodboard extends libPictView
 			if (tmpDataNow.IsSvg) { tmpSelf._loadInlineSvg(pNodeHash, tmpDataNow.DrawingUrl, tmpRev); }
 			tmpSelf._toast('Updated from source');
 		};
-		let tmpSource = this._ImageSource;
+		let tmpSource = this._DrawingSource || this._ImageSource;
 		if (tmpSource && typeof tmpSource.getItem === 'function' && tmpData.SourceId != null && tmpData.SourceId !== '')
 		{
 			Promise.resolve(tmpSource.getItem(tmpData.SourceId)).then(function (pItem) { fApply(pItem || null); }).catch(function () { fApply(null); });
@@ -2386,7 +2391,13 @@ class PictViewMoodboard extends libPictView
 		return tmpMb.Gallery;
 	}
 
-	_activeGallerySource() { return (this._galleryState().Mode === 'sticker') ? this._StickerSource : this._ImageSource; }
+	_activeGallerySource()
+	{
+		let tmpMode = this._galleryState().Mode;
+		if (tmpMode === 'sticker') { return this._StickerSource; }
+		if (tmpMode === 'drawing') { return this._DrawingSource || this._ImageSource; }
+		return this._ImageSource;
+	}
 
 	// Open the picker for a specific card: a pick (or an upload) sets the chosen image / sticker onto
 	// THIS node, rather than adding a new card. Called from the Image / Sticker properties panels.
@@ -2405,12 +2416,12 @@ class PictViewMoodboard extends libPictView
 		let tmpIsSticker = (tmpMode === 'sticker');
 		tmpGallery.Open = true;
 		tmpGallery.Mode = tmpMode;
-		tmpGallery.Title = tmpIsSticker ? 'Stickers' : (tmpMode === 'drawing') ? 'Pick a drawing' : 'Image gallery';
-		tmpGallery.SearchPlaceholder = tmpIsSticker ? 'Search stickers' : (tmpMode === 'drawing') ? 'Search gallery' : 'Search images';
+		tmpGallery.Title = tmpIsSticker ? 'Stickers' : (tmpMode === 'drawing') ? 'Pick a drawing or image' : 'Image gallery';
+		tmpGallery.SearchPlaceholder = tmpIsSticker ? 'Search stickers' : (tmpMode === 'drawing') ? 'Search drawings and images' : 'Search images';
 		tmpGallery.EmptyMessage = tmpIsSticker
 			? 'No stickers here yet. Upload a PNG or SVG and it shows up here to reuse.'
 			: (tmpMode === 'drawing')
-				? 'Nothing in the gallery yet. Upload an image or drawing (or drop / paste one on the board) and it shows up here to reuse.'
+				? 'No drawings or images yet. Make one in Drawings, or upload an image here (you can also drop / paste one on the board).'
 				: 'No images here yet. Upload a file (or drop / paste one on the board) and it shows up here to reuse.';
 		tmpGallery.UploadAccept = tmpIsSticker ? 'image/svg+xml,image/png' : 'image/*';
 		// Fresh query each open so a search / filter from the other mode does not leak across.
