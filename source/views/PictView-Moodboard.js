@@ -2483,7 +2483,9 @@ class PictViewMoodboard extends libPictView
 	pickFromGallery(pId)
 	{
 		let tmpGallery = this._galleryState();
-		let tmpItem = (tmpGallery.Items || []).find((pItem) => pItem.Id === pId);
+		// The tile onclick passes the id as a string (it is quoted in the template), but a host source can
+		// key items by a number (plansheet's IDMedia); compare as strings so a numeric id still matches.
+		let tmpItem = (tmpGallery.Items || []).find((pItem) => String(pItem.Id) === String(pId));
 		if (!tmpItem) { return; }
 		if (this._PickerTargetHash)
 		{

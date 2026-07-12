@@ -131,6 +131,60 @@ function ()
 		});
 	});
 
+	suite('pickFromGallery id matching',
+	function ()
+	{
+		// The gallery tile's onclick passes the id as a quoted STRING; a host source (plansheet) keys its
+		// items by a NUMBER (IDMedia). The match must survive that type gap or clicking a tile does nothing.
+		function makePickStub(pMode, pItems, pTargetHash)
+		{
+			let tmpCalls = { drawing: null, image: null, closed: false };
+			let tmpStub = makeStub(
+				{
+					pict: { AppData: { Moodboard: { Gallery: { Mode: pMode, Items: pItems } } } },
+					_PickerTargetHash: pTargetHash,
+					setDrawingSource: function (pHash, pItem) { tmpCalls.drawing = { hash: pHash, item: pItem }; },
+					setImageUrl: function (pHash, pUrl) { tmpCalls.image = { hash: pHash, url: pUrl }; },
+					closeGallery: function () { tmpCalls.closed = true; }
+				});
+			return { stub: tmpStub, calls: tmpCalls };
+		}
+
+		test('a numeric item id matches the string the tile passes (drawing mode)', function ()
+		{
+			let tmp = makePickStub('drawing', [{ Id: 5, Url: '/1.0/Media/5/Blob', Name: 'SAD-001' }], 'node-1');
+			tmp.stub.pickFromGallery('5'); // the tile always passes a string
+			libExpect(tmp.calls.drawing).to.not.equal(null);
+			libExpect(tmp.calls.drawing.item.Id).to.equal(5);
+			libExpect(tmp.calls.drawing.hash).to.equal('node-1');
+			libExpect(tmp.calls.closed).to.equal(true);
+		});
+
+		test('a numeric item id matches in image mode too', function ()
+		{
+			let tmp = makePickStub('image', [{ Id: 7, Url: '/1.0/Media/7/Blob' }], 'node-2');
+			tmp.stub.pickFromGallery('7');
+			libExpect(tmp.calls.image).to.not.equal(null);
+			libExpect(tmp.calls.image.url).to.equal('/1.0/Media/7/Blob');
+		});
+
+		test('a string item id (the built-in base source) still matches', function ()
+		{
+			let tmp = makePickStub('drawing', [{ Id: 'img-3', Url: 'data:x' }], 'node-3');
+			tmp.stub.pickFromGallery('img-3');
+			libExpect(tmp.calls.drawing).to.not.equal(null);
+			libExpect(tmp.calls.drawing.item.Id).to.equal('img-3');
+		});
+
+		test('an id with no matching item does nothing (no throw, nothing picked)', function ()
+		{
+			let tmp = makePickStub('drawing', [{ Id: 5, Url: 'x' }], 'node-4');
+			tmp.stub.pickFromGallery('999');
+			libExpect(tmp.calls.drawing).to.equal(null);
+			libExpect(tmp.calls.closed).to.equal(false);
+		});
+	});
+
 	suite('module export',
 	function ()
 	{
