@@ -16,6 +16,7 @@ const libMoodboardView = require('./views/PictView-Moodboard.js');
 module.exports = libMoodboardView;
 module.exports.default_configuration = libMoodboardView.default_configuration;
 module.exports.MoodImageCard = require('./cards/MoodImage-Card.js');
+module.exports.MoodDrawingCard = require('./cards/MoodDrawing-Card.js');
 module.exports.MoodNoteCard = require('./cards/MoodNote-Card.js');
 module.exports.MoodTextCard = require('./cards/MoodText-Card.js');
 module.exports.MoodStickerCard = require('./cards/MoodSticker-Card.js');

@@ -25,6 +25,7 @@
 const libPictView = require('pict-view');
 const libPictSectionFlow = require('pict-section-flow');
 const libMoodImageCard = require('../cards/MoodImage-Card.js');
+const libMoodDrawingCard = require('../cards/MoodDrawing-Card.js');
 const libMoodNoteCard = require('../cards/MoodNote-Card.js');
 const libMoodTextCard = require('../cards/MoodText-Card.js');
 const libMoodStickerCard = require('../cards/MoodSticker-Card.js');
@@ -257,11 +258,16 @@ const _ViewConfiguration =
 		/* Connection ports show as small dots only when a card opts in (its panel adds them); the dots are
 		   for editing, so hide them on a read-only board (the connecting lines still render). Port labels
 		   stay hidden either way -- moodboard ports are unlabeled anchors. */
-		.pict-flow-node-MoodImage .pict-flow-port-label, .pict-flow-node-MoodNote .pict-flow-port-label, .pict-flow-node-MoodText .pict-flow-port-label, .pict-flow-node-MoodSticker .pict-flow-port-label { display: none; }
+		.pict-flow-node-MoodImage .pict-flow-port-label, .pict-flow-node-MoodDrawing .pict-flow-port-label, .pict-flow-node-MoodNote .pict-flow-port-label, .pict-flow-node-MoodText .pict-flow-port-label, .pict-flow-node-MoodSticker .pict-flow-port-label { display: none; }
 		.mb-readonly .pict-flow-port { display: none; }
 		.mb-image { width: 100%; height: 100%; display: block; border-radius: 8px; object-fit: cover; }
 		.mb-image-cover { object-fit: cover; }
 		.mb-image-contain { object-fit: contain; }
+		/* Drawing card: a gallery image / drawing rendered into the board SVG (a native <image>, or the
+		   inlined vector for an SVG source). Empty state is a dashed placeholder until a source is picked. */
+		.mb-drawing { display: block; }
+		.mb-drawing-empty { fill: none; stroke: var(--theme-color-border-default, #c2cad6); stroke-width: 1; stroke-dasharray: 4 3; rx: 6px; ry: 6px; }
+		.mb-drawing-empty-label { fill: var(--theme-color-text-secondary, #8a93a5); font-size: 12px; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; }
 		.mb-note { width: 100%; height: 100%; box-sizing: border-box; padding: 10px; font-family: inherit; font-size: 13px; line-height: 1.35; color: #3a3320; overflow: hidden; white-space: pre-wrap; word-break: break-word; }
 		.mb-note:empty::before { content: attr(data-ph); color: rgba(0,0,0,0.35); }
 		.mb-text:empty::before { content: attr(data-ph); color: var(--theme-color-text-secondary, rgba(0,0,0,0.35)); }
@@ -300,6 +306,9 @@ const _ViewConfiguration =
 		.mbp-colorset .mbp-color { width: auto; flex: 1; }
 		.mbp-colorset .mbp-sec { display: none; }
 		.mbp-colorset .mbp-sec.mbp-show { display: block; }
+		/* Drawing card: the "linked source" block (name + Update from source) shows once a source is set. */
+		.mbp-drawingsource { display: none; flex-direction: column; gap: 6px; }
+		.mbp-drawingsource.mbp-show { display: flex; }
 		/* A panel action button (e.g. "Pick from library", "Pick a sticker"). */
 		.mbp-btn { align-self: flex-start; padding: 5px 10px; border: 1px solid var(--theme-color-border-default, #d8dde6); border-radius: 6px; background: var(--theme-color-background-panel, #fff); color: var(--theme-color-text-primary, #222); cursor: pointer; font-size: 12px; }
 		.mbp-btn:hover { background: var(--theme-color-background-hover, #f2f2f2); }
@@ -1291,7 +1300,7 @@ class PictViewMoodboard extends libPictView
 			// The connector is registered with Enabled:false: it stays a known node type so older boards
 			// with connector nodes still render, but it is hidden from the card palette (edges are drawn
 			// between card ports now, opted in from each card's panel).
-			[ new libMoodImageCard(this.fable, {}, 'Moodboard-ImageCard'), new libMoodNoteCard(this.fable, {}, 'Moodboard-NoteCard'), new libMoodTextCard(this.fable, {}, 'Moodboard-TextCard'), new libMoodStickerCard(this.fable, {}, 'Moodboard-StickerCard'), new libMoodConnectorCard(this.fable, { Enabled: false }, 'Moodboard-ConnectorCard') ].forEach((pCard) =>
+			[ new libMoodImageCard(this.fable, {}, 'Moodboard-ImageCard'), new libMoodDrawingCard(this.fable, {}, 'Moodboard-DrawingCard'), new libMoodNoteCard(this.fable, {}, 'Moodboard-NoteCard'), new libMoodTextCard(this.fable, {}, 'Moodboard-TextCard'), new libMoodStickerCard(this.fable, {}, 'Moodboard-StickerCard'), new libMoodConnectorCard(this.fable, { Enabled: false }, 'Moodboard-ConnectorCard') ].forEach((pCard) =>
 			{
 				let tmpConfig = pCard.getNodeTypeConfiguration();
 				tmpNodeTypes[tmpConfig.Hash] = tmpConfig;
@@ -1423,6 +1432,13 @@ class PictViewMoodboard extends libPictView
 		if (pNode.Type === 'MoodSticker' && pNode.Hash && !(pNode.Data && pNode.Data.StickerUrl))
 		{
 			this.openPickerForCard(pNode.Hash, 'sticker');
+		}
+		// A drawing card is empty until you pick a gallery item -- from the palette you always then want to
+		// pick, so open the picker straight away (targeting this card). Skip it when the card already carries
+		// a source (the gallery placement path adds the node already linked, see _addDrawingCard).
+		if (pNode.Type === 'MoodDrawing' && pNode.Hash && !(pNode.Data && (pNode.Data.DrawingUrl || pNode.Data.SvgMarkup)))
+		{
+			this.openPickerForCard(pNode.Hash, 'drawing');
 		}
 	}
 
@@ -1699,6 +1715,303 @@ class PictViewMoodboard extends libPictView
 			// Only auto-fit a card still at the MoodImage default (240x200); respect a resized tile.
 			if (Number(tmpNode.Width) !== 240 || Number(tmpNode.Height) !== 200) { return; }
 			let tmpLong = 280;
+			if (tmpNaturalW >= tmpNaturalH)
+			{
+				tmpNode.Width = tmpLong;
+				tmpNode.Height = Math.max(80, Math.round(tmpLong * tmpNaturalH / tmpNaturalW));
+			}
+			else
+			{
+				tmpNode.Height = tmpLong;
+				tmpNode.Width = Math.max(80, Math.round(tmpLong * tmpNaturalW / tmpNaturalH));
+			}
+			if (typeof tmpSelf._FlowView.renderFlow === 'function') { tmpSelf._FlowView.renderFlow(); }
+			tmpSelf._FlowView.marshalFromView();
+			tmpSelf._emitChange();
+		};
+		tmpProbe.src = pUrl;
+	}
+
+	// ---- Drawing cards (a gallery image / drawing, linked to its source, rendered into the board SVG) ----
+
+	// Link a drawing card to a gallery item and paint it. Stores the source id (so it can be refreshed),
+	// renders it as a native <image> straight away, and -- when the source is an SVG -- kicks off a fetch
+	// that replaces the <image> with the inlined vector (see _loadInlineSvg) so it projects into the SVG.
+	setDrawingSource(pNodeHash, pItem)
+	{
+		if (!this._FlowView || !pItem) { return; }
+		let tmpNode = this._FlowView.getNode(pNodeHash);
+		if (!tmpNode) { return; }
+		if (!tmpNode.Data) { tmpNode.Data = {}; }
+		let tmpUrl = pItem.Url || '';
+		tmpNode.Data.SourceId = (typeof pItem.Id !== 'undefined') ? pItem.Id : null;
+		tmpNode.Data.SourceName = pItem.Name || this._urlName(tmpUrl);
+		tmpNode.Data.DrawingUrl = tmpUrl;
+		tmpNode.Data.IsSvg = this._looksLikeSvg(pItem);
+		// A freshly linked source starts without inlined vector; if it is an SVG, _loadInlineSvg fills it in.
+		tmpNode.Data.SvgMarkup = '';
+		tmpNode.Data.SvgViewBox = '';
+		tmpNode.Data.Rev = 0;
+		// A drawing (a diagram) usually wants to show whole, so default Fit to contain the first time.
+		if (tmpNode.Data.Fit !== 'cover' && tmpNode.Data.Fit !== 'contain') { tmpNode.Data.Fit = 'contain'; }
+		this._stampDrawingFlags(tmpNode);
+		this._sizeCardToDrawing(pNodeHash, tmpUrl);
+		this._FlowView.renderFlow();
+		this._FlowView.marshalFromView();
+		this._emitChange();
+		if (tmpNode.Data.IsSvg) { this._loadInlineSvg(pNodeHash, tmpUrl, 0); }
+	}
+
+	// Re-pull the linked source (a re-saved drawing, a replaced blob). Bumps a revision so the browser
+	// re-loads, re-fetches the vector for an SVG, and (if the source exposes getItem) refreshes the URL /
+	// name too. With nothing linked yet, this is the "pick a source" affordance.
+	refreshDrawing(pNodeHash)
+	{
+		if (!this._FlowView) { return; }
+		let tmpNode = this._FlowView.getNode(pNodeHash);
+		if (!tmpNode || !tmpNode.Data) { return; }
+		let tmpData = tmpNode.Data;
+		if ((tmpData.SourceId == null || tmpData.SourceId === '') && !tmpData.DrawingUrl)
+		{
+			this.openPickerForCard(pNodeHash, 'drawing');
+			return;
+		}
+		let tmpSelf = this;
+		let tmpRev = ((typeof tmpData.Rev === 'number') ? tmpData.Rev : 0) + 1;
+		let fApply = function (pItem)
+		{
+			let tmpNodeNow = tmpSelf._FlowView ? tmpSelf._FlowView.getNode(pNodeHash) : null;
+			if (!tmpNodeNow || !tmpNodeNow.Data) { return; }
+			let tmpDataNow = tmpNodeNow.Data;
+			if (pItem)
+			{
+				if (pItem.Url) { tmpDataNow.DrawingUrl = pItem.Url; }
+				if (pItem.Name) { tmpDataNow.SourceName = pItem.Name; }
+				if (tmpSelf._looksLikeSvg(pItem)) { tmpDataNow.IsSvg = true; }
+			}
+			tmpDataNow.Rev = tmpRev;
+			// Drop the stale inline so the card re-renders as <image>, then re-inline if the source is SVG.
+			tmpDataNow.SvgMarkup = '';
+			tmpDataNow.SvgViewBox = '';
+			tmpSelf._stampDrawingFlags(tmpNodeNow);
+			tmpSelf._FlowView.renderFlow();
+			tmpSelf._FlowView.marshalFromView();
+			tmpSelf._emitChange();
+			if (tmpDataNow.IsSvg) { tmpSelf._loadInlineSvg(pNodeHash, tmpDataNow.DrawingUrl, tmpRev); }
+			tmpSelf._toast('Updated from source');
+		};
+		let tmpSource = this._ImageSource;
+		if (tmpSource && typeof tmpSource.getItem === 'function' && tmpData.SourceId != null && tmpData.SourceId !== '')
+		{
+			Promise.resolve(tmpSource.getItem(tmpData.SourceId)).then(function (pItem) { fApply(pItem || null); }).catch(function () { fApply(null); });
+		}
+		else { fApply(null); }
+	}
+
+	// Cover / contain for a drawing card. Updates the rendered element's preserveAspectRatio in place (the
+	// SVG body reads Fit at render time) without a full re-render, then persists.
+	setDrawingFit(pNodeHash, pFit)
+	{
+		if (!this._FlowView) { return; }
+		let tmpNode = this._FlowView.getNode(pNodeHash);
+		if (!tmpNode) { return; }
+		if (!tmpNode.Data) { tmpNode.Data = {}; }
+		tmpNode.Data.Fit = (pFit === 'cover') ? 'cover' : 'contain';
+		this._stampDrawingFlags(tmpNode);
+		let tmpEl = this._cardElement(pNodeHash, '.mb-drawing');
+		if (tmpEl) { tmpEl.setAttribute('preserveAspectRatio', (tmpNode.Data.Fit === 'cover') ? 'xMidYMid slice' : 'xMidYMid meet'); }
+		this._FlowView.marshalFromView();
+		this._emitChange();
+	}
+
+	// Stand-alone placement (no target card): add a drawing card already linked to a gallery item. The node
+	// is seeded with the source URL so the palette's onNodeAdded (see _onNodeAdded) does not re-open the
+	// picker on top of it; setDrawingSource then fills in the rest (id, name, SVG inline, sizing).
+	_addDrawingCard(pItem)
+	{
+		if (!this._FlowView || !pItem) { return; }
+		let tmpPos = this._nextPosition();
+		let tmpNode = this._FlowView.addNode('MoodDrawing', tmpPos.x, tmpPos.y, '', { DrawingUrl: (pItem.Url || '') });
+		if (tmpNode)
+		{
+			tmpNode.Ports = [];
+			this._FlowView.selectNode(tmpNode.Hash);
+			this._FlowView.renderFlow();
+			this._FlowView.marshalFromView();
+			this.setDrawingSource(tmpNode.Hash, pItem);
+		}
+		if (this._galleryState().Open) { this._refreshGalleryGrid(); }
+	}
+
+	// Panel state stamped onto node Data (persisted, like the connect-mode selects): the Fit select's
+	// current option and whether the "linked source" block shows.
+	_stampDrawingFlags(pNode)
+	{
+		if (!pNode || !pNode.Data) { return; }
+		let tmpData = pNode.Data;
+		let tmpFit = (tmpData.Fit === 'cover') ? 'cover' : 'contain';
+		tmpData.FitContainSel = (tmpFit === 'contain') ? 'selected' : '';
+		tmpData.FitCoverSel = (tmpFit === 'cover') ? 'selected' : '';
+		tmpData._SourceShow = (((tmpData.SourceId != null) && (tmpData.SourceId !== '')) || tmpData.DrawingUrl) ? 'mbp-show' : '';
+	}
+
+	// Is this gallery item an SVG (so it should be inlined as vector)? Reads the source's mime, the file
+	// name / original name, and the URL (a data: URL or a .svg path).
+	_looksLikeSvg(pItem)
+	{
+		if (!pItem) { return false; }
+		let tmpMeta = pItem.Metadata || {};
+		let tmpMime = String(tmpMeta.MimeType || tmpMeta.Mime || '').toLowerCase();
+		if (tmpMime.indexOf('svg') >= 0) { return true; }
+		let fEndsSvg = function (pStr) { let tmpS = String(pStr || '').toLowerCase().split('?')[0].split('#')[0]; return (tmpS.length >= 4) && (tmpS.slice(-4) === '.svg'); };
+		if (fEndsSvg(pItem.Name) || fEndsSvg(tmpMeta.OriginalFileName)) { return true; }
+		let tmpUrl = String(pItem.Url || '').toLowerCase();
+		if (tmpUrl.indexOf('data:image/svg') === 0) { return true; }
+		if (fEndsSvg(tmpUrl)) { return true; }
+		return false;
+	}
+
+	// Fetch an SVG source and inline its (sanitized) vector onto the card so it projects into the board's
+	// SVG. Guards against a superseding refresh (rev mismatch); on any failure the <image> fallback stays.
+	_loadInlineSvg(pNodeHash, pUrl, pRev)
+	{
+		if (typeof fetch === 'undefined' || !pUrl) { return; }
+		let tmpSelf = this;
+		let tmpFetchUrl = pUrl;
+		if (pRev && pUrl.indexOf('data:') !== 0) { tmpFetchUrl = pUrl + ((pUrl.indexOf('?') >= 0) ? '&' : '?') + '_r=' + pRev; }
+		let tmpPromise;
+		try { tmpPromise = fetch(tmpFetchUrl, { credentials: 'same-origin' }); }
+		catch (pErr) { return; }
+		Promise.resolve(tmpPromise)
+			.then(function (pResponse) { if (!pResponse || !pResponse.ok) { throw new Error('http ' + (pResponse ? pResponse.status : '?')); } return pResponse.text(); })
+			.then(function (pText)
+			{
+				let tmpNode = (tmpSelf._FlowView && typeof tmpSelf._FlowView.getNode === 'function') ? tmpSelf._FlowView.getNode(pNodeHash) : null;
+				if (!tmpNode || !tmpNode.Data) { return; }
+				// A newer refresh may have superseded this fetch; only apply if the revision still matches.
+				let tmpCurrentRev = (typeof tmpNode.Data.Rev === 'number') ? tmpNode.Data.Rev : 0;
+				if ((pRev || 0) !== tmpCurrentRev) { return; }
+				let tmpPrepared = tmpSelf._prepareSvg(pText, pNodeHash);
+				if (!tmpPrepared || !tmpPrepared.Inner) { return; }
+				tmpNode.Data.SvgMarkup = tmpPrepared.Inner;
+				tmpNode.Data.SvgViewBox = tmpPrepared.ViewBox || '';
+				if (typeof tmpSelf._FlowView.renderFlow === 'function') { tmpSelf._FlowView.renderFlow(); }
+				tmpSelf._FlowView.marshalFromView();
+				tmpSelf._emitChange();
+			})
+			.catch(function () { /* keep the <image> fallback already on the card */ });
+	}
+
+	// Parse, sanitize, and id-namespace an SVG document, returning its inner markup + viewBox for inlining.
+	// Sanitize drops scripts / foreignObjects and strips event handlers + external references; namespacing
+	// prefixes every id (and its url(#..) / href="#.." references) so two inlined drawings never collide.
+	_prepareSvg(pText, pNodeHash)
+	{
+		if (!pText || typeof DOMParser === 'undefined') { return null; }
+		if (pText.length > 524288) { return null; }
+		let tmpDoc;
+		try { tmpDoc = new DOMParser().parseFromString(pText, 'image/svg+xml'); }
+		catch (pErr) { return null; }
+		if (!tmpDoc || (tmpDoc.getElementsByTagName('parsererror').length > 0)) { return null; }
+		let tmpSvg = tmpDoc.documentElement;
+		if (!tmpSvg || String(tmpSvg.nodeName).toLowerCase() !== 'svg') { return null; }
+
+		let tmpAll = tmpSvg.getElementsByTagName('*');
+		let tmpRemove = [];
+		for (let i = 0; i < tmpAll.length; i++)
+		{
+			let tmpEl = tmpAll[i];
+			let tmpTag = String(tmpEl.nodeName).toLowerCase();
+			if (tmpTag === 'script' || tmpTag === 'foreignobject') { tmpRemove.push(tmpEl); continue; }
+			let tmpAttrs = Array.prototype.slice.call(tmpEl.attributes || []);
+			for (let a = 0; a < tmpAttrs.length; a++)
+			{
+				let tmpName = tmpAttrs[a].name;
+				let tmpLower = tmpName.toLowerCase();
+				let tmpVal = tmpAttrs[a].value;
+				if (tmpLower.indexOf('on') === 0) { tmpEl.removeAttribute(tmpName); continue; }
+				if ((tmpLower === 'href' || tmpLower === 'xlink:href') && tmpVal && tmpVal.charAt(0) !== '#' && tmpVal.indexOf('data:') !== 0)
+				{
+					tmpEl.removeAttribute(tmpName);
+				}
+			}
+		}
+		for (let r = 0; r < tmpRemove.length; r++) { if (tmpRemove[r].parentNode) { tmpRemove[r].parentNode.removeChild(tmpRemove[r]); } }
+
+		let tmpPrefix = 'mbd' + String(pNodeHash || '').replace(/[^a-zA-Z0-9]/g, '') + '-';
+		let tmpIdNodes = tmpSvg.querySelectorAll('[id]');
+		let tmpIdMap = {};
+		let tmpKeys = [];
+		for (let n = 0; n < tmpIdNodes.length; n++)
+		{
+			let tmpOld = tmpIdNodes[n].getAttribute('id');
+			if (!tmpOld || tmpIdMap[tmpOld]) { continue; }
+			tmpIdMap[tmpOld] = tmpPrefix + tmpOld;
+			tmpKeys.push(tmpOld);
+			tmpIdNodes[n].setAttribute('id', tmpIdMap[tmpOld]);
+		}
+		if (tmpKeys.length)
+		{
+			let tmpRefNodes = tmpSvg.getElementsByTagName('*');
+			for (let m = 0; m < tmpRefNodes.length; m++)
+			{
+				let tmpEl = tmpRefNodes[m];
+				let tmpAttrs = Array.prototype.slice.call(tmpEl.attributes || []);
+				for (let a = 0; a < tmpAttrs.length; a++)
+				{
+					let tmpName = tmpAttrs[a].name;
+					let tmpLower = tmpName.toLowerCase();
+					let tmpVal = tmpAttrs[a].value;
+					if (!tmpVal) { continue; }
+					let tmpNew = tmpVal;
+					for (let k = 0; k < tmpKeys.length; k++)
+					{
+						let tmpOld = tmpKeys[k];
+						let tmpTo = tmpIdMap[tmpOld];
+						tmpNew = tmpNew.split('url(#' + tmpOld + ')').join('url(#' + tmpTo + ')');
+						tmpNew = tmpNew.split("url('#" + tmpOld + "')").join("url('#" + tmpTo + "')");
+						tmpNew = tmpNew.split('url("#' + tmpOld + '")').join('url("#' + tmpTo + '")');
+						if ((tmpLower === 'href' || tmpLower === 'xlink:href') && (tmpVal === '#' + tmpOld)) { tmpNew = '#' + tmpTo; }
+					}
+					if (tmpNew !== tmpVal) { tmpEl.setAttribute(tmpName, tmpNew); }
+				}
+			}
+		}
+
+		let tmpViewBox = tmpSvg.getAttribute('viewBox') || '';
+		if (!tmpViewBox)
+		{
+			let tmpW = parseFloat(tmpSvg.getAttribute('width'));
+			let tmpH = parseFloat(tmpSvg.getAttribute('height'));
+			if (tmpW > 0 && tmpH > 0) { tmpViewBox = '0 0 ' + tmpW + ' ' + tmpH; }
+		}
+
+		let tmpInner = '';
+		try
+		{
+			let tmpSerializer = new XMLSerializer();
+			for (let c = 0; c < tmpSvg.childNodes.length; c++) { tmpInner += tmpSerializer.serializeToString(tmpSvg.childNodes[c]); }
+		}
+		catch (pErr) { return null; }
+		if (!tmpInner || tmpInner.length > 262144) { return null; }
+		return { Inner: tmpInner, ViewBox: tmpViewBox };
+	}
+
+	// Resize a drawing card to its source's natural aspect (mirrors _sizeCardToImage; drawing default box).
+	_sizeCardToDrawing(pNodeHash, pUrl)
+	{
+		if (typeof Image === 'undefined' || !pUrl) { return; }
+		let tmpSelf = this;
+		let tmpProbe = new Image();
+		tmpProbe.onload = function ()
+		{
+			let tmpNaturalW = tmpProbe.naturalWidth, tmpNaturalH = tmpProbe.naturalHeight;
+			if (!tmpNaturalW || !tmpNaturalH || !tmpSelf._FlowView) { return; }
+			let tmpNode = tmpSelf._FlowView.getNode(pNodeHash);
+			if (!tmpNode) { return; }
+			// Only auto-fit a card still at the MoodDrawing default (260x200); respect a resized tile.
+			if (Number(tmpNode.Width) !== 260 || Number(tmpNode.Height) !== 200) { return; }
+			let tmpLong = 300;
 			if (tmpNaturalW >= tmpNaturalH)
 			{
 				tmpNode.Width = tmpLong;
@@ -2086,15 +2399,20 @@ class PictViewMoodboard extends libPictView
 	openGallery(pMode)
 	{
 		let tmpGallery = this._galleryState();
-		let tmpMode = (pMode === 'sticker') ? 'sticker' : 'image';
+		// 'drawing' shares the image source (a drawing is a gallery item like any other) but titles the
+		// picker for the drawing card and routes the pick to setDrawingSource (see pickFromGallery).
+		let tmpMode = (pMode === 'sticker') ? 'sticker' : (pMode === 'drawing') ? 'drawing' : 'image';
+		let tmpIsSticker = (tmpMode === 'sticker');
 		tmpGallery.Open = true;
 		tmpGallery.Mode = tmpMode;
-		tmpGallery.Title = (tmpMode === 'sticker') ? 'Stickers' : 'Image gallery';
-		tmpGallery.SearchPlaceholder = (tmpMode === 'sticker') ? 'Search stickers' : 'Search images';
-		tmpGallery.EmptyMessage = (tmpMode === 'sticker')
+		tmpGallery.Title = tmpIsSticker ? 'Stickers' : (tmpMode === 'drawing') ? 'Pick a drawing' : 'Image gallery';
+		tmpGallery.SearchPlaceholder = tmpIsSticker ? 'Search stickers' : (tmpMode === 'drawing') ? 'Search gallery' : 'Search images';
+		tmpGallery.EmptyMessage = tmpIsSticker
 			? 'No stickers here yet. Upload a PNG or SVG and it shows up here to reuse.'
-			: 'No images here yet. Upload a file (or drop / paste one on the board) and it shows up here to reuse.';
-		tmpGallery.UploadAccept = (tmpMode === 'sticker') ? 'image/svg+xml,image/png' : 'image/*';
+			: (tmpMode === 'drawing')
+				? 'Nothing in the gallery yet. Upload an image or drawing (or drop / paste one on the board) and it shows up here to reuse.'
+				: 'No images here yet. Upload a file (or drop / paste one on the board) and it shows up here to reuse.';
+		tmpGallery.UploadAccept = tmpIsSticker ? 'image/svg+xml,image/png' : 'image/*';
 		// Fresh query each open so a search / filter from the other mode does not leak across.
 		tmpGallery.Query = { Search: '', Filters: {}, Sort: { Field: null, Direction: 'asc' } };
 		tmpGallery.SortDirLabel = 'Asc';
@@ -2159,11 +2477,13 @@ class PictViewMoodboard extends libPictView
 		if (this._PickerTargetHash)
 		{
 			if (tmpGallery.Mode === 'sticker') { this.setStickerUrl(this._PickerTargetHash, tmpItem.Url, tmpItem.Metadata); }
+			else if (tmpGallery.Mode === 'drawing') { this.setDrawingSource(this._PickerTargetHash, tmpItem); }
 			else { this.setImageUrl(this._PickerTargetHash, tmpItem.Url); }
 			this.closeGallery();
 			return;
 		}
 		if (tmpGallery.Mode === 'sticker') { this._addStickerCard(tmpItem.Url, Object.assign({ Name: tmpItem.Name }, tmpItem.Metadata)); }
+		else if (tmpGallery.Mode === 'drawing') { this._addDrawingCard(tmpItem); }
 		else { this.addImage(tmpItem.Url, Object.assign({ Name: tmpItem.Name }, tmpItem.Metadata)); }
 	}
 
@@ -2186,17 +2506,19 @@ class PictViewMoodboard extends libPictView
 		tmpReader.onload = function (pEvent)
 		{
 			let tmpMeta = { Name: tmpFile.name, Type: tmpFile.type || tmpMode, SizeBytes: tmpFile.size || 0, AddedAt: Date.now() };
-			let fAssign = function (pUrl)
+			let fAssign = function (pUrl, pRef)
 			{
 				if (tmpSource && typeof tmpSource.add === 'function') { tmpSource.add({ Url: pUrl, Name: tmpMeta.Name, Metadata: { Type: tmpMeta.Type, SizeBytes: tmpMeta.SizeBytes, AddedAt: tmpMeta.AddedAt } }); }
-				if (tmpMode === 'sticker') { tmpSelf.setStickerUrl(tmpTarget, pUrl); } else { tmpSelf.setImageUrl(tmpTarget, pUrl); }
+				if (tmpMode === 'sticker') { tmpSelf.setStickerUrl(tmpTarget, pUrl); }
+				else if (tmpMode === 'drawing') { tmpSelf.setDrawingSource(tmpTarget, { Id: (pRef && pRef.Id != null) ? pRef.Id : null, Name: tmpMeta.Name, Url: pUrl, Metadata: { MimeType: tmpFile.type || '', OriginalFileName: tmpFile.name || '' } }); }
+				else { tmpSelf.setImageUrl(tmpTarget, pUrl); }
 				tmpSelf.closeGallery();
 			};
 			if (tmpSource && typeof tmpSource.upload === 'function')
 			{
-				tmpSource.upload(tmpFile, pEvent.target.result, function (pErr, pRef) { if (pErr) { return; } fAssign((pRef && pRef.Url) ? pRef.Url : pEvent.target.result); });
+				tmpSource.upload(tmpFile, pEvent.target.result, function (pErr, pRef) { if (pErr) { return; } fAssign((pRef && pRef.Url) ? pRef.Url : pEvent.target.result, pRef); });
 			}
-			else { fAssign(pEvent.target.result); }
+			else { fAssign(pEvent.target.result, null); }
 		};
 		tmpReader.readAsDataURL(tmpFile);
 	}

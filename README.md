@@ -3,16 +3,17 @@
 [pict-section-moodboard on npm](https://www.npmjs.com/package/pict-section-moodboard) | [MIT License](LICENSE)
 
 A free-form moodboard canvas for the Pict application framework: a board of draggable, resizable
-image tiles, sticky notes, big-type text statements, and stickers, over a board background you can
-tint. It is a thin, heavily customized layer over
+image tiles, linked drawings, sticky notes, big-type text statements, and stickers, over a board
+background you can tint. It is a thin, heavily customized layer over
 [pict-section-flow](https://www.npmjs.com/package/pict-section-flow) (no ports, no connections, a
 zero-height title bar so cards fill edge to edge), so you get drag, resize, pan, zoom, multi-select,
 marquee, alignment guides, and save/restore for free.
 
 Each card is edited through its on-graph properties panel (double-click a card): a textarea plus the
-card's parameters (image URL and fit; note color; a curated font family, weight, size, and text
-color for notes and text; sticker URL; rotation). The card body itself is a read-only display, so the
-whole card drags from anywhere.
+card's parameters (image URL and fit; a linked drawing picked from the gallery, updatable from its
+source and rendered into the board's own SVG; note color; a curated font family, weight, size, and
+text color for notes and text; sticker URL; rotation). The card body itself is a read-only display,
+so the whole card drags from anywhere.
 
 A board can be shown read-only (`Editable: false`): the edit toolbar and card panels are off, but a
 viewer bar gives fit-to-content, zoom in/out, and a fullscreen toggle, and the board still pans and
